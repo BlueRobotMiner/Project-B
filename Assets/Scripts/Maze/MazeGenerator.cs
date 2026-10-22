@@ -27,46 +27,55 @@ public static class MazeGenerator
         new Vector2Int(2, 0), new Vector2Int(-2, 0)
     };
 
-    public static MazeGrid Generate(int cellsX, int cellsY, int seed, int startRoomRadius)
+    public static MazeGrid Generate(int cellsX, int cellsY, int seed, RoomLayout room)
     {
         int width = cellsX * 2 + 1;
         int height = cellsY * 2 + 1;
         var grid = new MazeGrid(width, height);
         var rng = new System.Random(seed);
 
-        // Center cell, in cell coordinates
-        int cx = cellsX / 2;
-        int cy = cellsY / 2;
+        // 1. Room tiles are open floor the maze never carves into
+        foreach (Vector2Int t in room.Reserved)
+            if (InBounds(t, width, height))
+                grid.Walls[t.x, t.y] = false;
 
-        // Keep the room inside the maze
-        int r = Mathf.Min(startRoomRadius, cx, cellsX - 1 - cx, cy, cellsY - 1 - cy);
-
-        // Grid tiles covered by the room (cells plus the gaps between them)
-        int minX = 2 * (cx - r) + 1;
-        int maxX = 2 * (cx + r) + 1;
-        int minY = 2 * (cy - r) + 1;
-        int maxY = 2 * (cy + r) + 1;
-
+        // 2. From each entrance, open a path outward until we reach a maze cell
         var stack = new Stack<Vector2Int>();
-
-        // Clear the start room and start the walk from every cell inside it
-        for (int x = minX; x <= maxX; x++)
+        foreach (Vector2Int e in room.Entrances)
         {
-            for (int y = minY; y <= maxY; y++)
-            {
-                grid.Walls[x, y] = false;
+            if (!InBounds(e, width, height))
+                continue;
 
-                bool isCell = (x % 2 == 1) && (y % 2 == 1);
-                if (isCell)
-                    stack.Push(new Vector2Int(x, y));
+            Vector2Int outward = FindOutward(e, room.Reserved, width, height);
+            if (outward == Vector2Int.zero)
+                continue;
+
+            grid.Walls[e.x, e.y] = false;
+            Vector2Int p = e;
+            while (!IsCell(p))
+            {
+                p += outward;
+                if (!InBounds(p, width, height))
+                    break;
+                grid.Walls[p.x, p.y] = false;
             }
+
+            if (InBounds(p, width, height) && IsCell(p))
+                stack.Push(p);
         }
 
+        // Safety net: an empty room still needs a starting cell
+        if (stack.Count == 0)
+        {
+            grid.Walls[1, 1] = false;
+            stack.Push(new Vector2Int(1, 1));
+        }
+
+        // 3. Recursive backtracker, growing out from every entrance
         while (stack.Count > 0)
         {
             Vector2Int current = stack.Peek();
 
-            // Directions where the cell two steps away is still a wall (unvisited)
             var options = new List<Vector2Int>();
             foreach (Vector2Int d in Directions)
             {
@@ -78,14 +87,13 @@ public static class MazeGenerator
 
             if (options.Count == 0)
             {
-                stack.Pop(); // dead end: go back
+                stack.Pop();
                 continue;
             }
 
             Vector2Int dir = options[rng.Next(options.Count)];
             Vector2Int next = current + dir;
 
-            // Knock out the wall between the two cells, then the new cell
             grid.Walls[current.x + dir.x / 2, current.y + dir.y / 2] = false;
             grid.Walls[next.x, next.y] = false;
 
@@ -93,5 +101,28 @@ public static class MazeGenerator
         }
 
         return grid;
+    }
+
+    static bool IsCell(Vector2Int p)
+    {
+        return p.x % 2 == 1 && p.y % 2 == 1;
+    }
+
+    static bool InBounds(Vector2Int p, int width, int height)
+    {
+        return p.x >= 0 && p.y >= 0 && p.x < width && p.y < height;
+    }
+
+    // The direction from an entrance that leads out of the room
+    static Vector2Int FindOutward(Vector2Int e, HashSet<Vector2Int> reserved, int width, int height)
+    {
+        Vector2Int[] steps = { Vector2Int.up, Vector2Int.down, Vector2Int.left, Vector2Int.right };
+        foreach (Vector2Int s in steps)
+        {
+            Vector2Int n = e + s;
+            if (InBounds(n, width, height) && !reserved.Contains(n))
+                return s;
+        }
+        return Vector2Int.zero;
     }
 }

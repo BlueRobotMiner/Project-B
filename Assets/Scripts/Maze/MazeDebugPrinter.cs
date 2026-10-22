@@ -11,7 +11,7 @@ public class MazeDebugPrinter : MonoBehaviour
 
     private void Start()
     {
-        MazeGrid grid = MazeGenerator.Generate(cellsX, cellsY, seed, startRoomRadius);
+        MazeGrid grid = MazeGenerator.Generate(cellsX, cellsY, seed, RoomLayout.Empty);
 
         Vector2Int playerTile = new Vector2Int(2 * (cellsX / 2) + 1, 2 * (cellsY / 2) + 1);
         MazeSpawnPlan plan = MazeSpawns.Plan(grid, playerTile, seed, minMonsterDistance);
