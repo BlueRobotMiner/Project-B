@@ -6,19 +6,21 @@ public class MazeBuilder : MonoBehaviour
 {
     [SerializeField] private int cellsX = 10;
     [SerializeField] private int cellsY = 10;
-    [SerializeField] private int seed = 0;               // 0 = random every run
+    [SerializeField] private int seed = 0;
     [SerializeField] private float cellSize = 2f;
-    [SerializeField] private float wallHeight = 2.5f;
-    [SerializeField] private GameObject wallPrefab;      // your CornWall prefab
-    [SerializeField] private Transform mazeRoot;         // the MazeRoot object itself
+    [SerializeField] private float wallHeight = 4f;
+    [SerializeField] private GameObject wallPrefab;      // CornWall
+    [SerializeField] private GameObject floorTilePrefab; // a flat cube
+    [SerializeField] private GameObject hideoutPrefab;   // a trigger cube on the floor
+    [SerializeField] private Transform mazeRoot;
     [SerializeField] private bool bakeNavMesh = true;
-    [SerializeField] private bool buildOnStart = false;  // the spawner builds it instead
-    [SerializeField] private int minMonsterDistance = 30; // in tiles
-    [SerializeField] private GameObject startRoomPrefab; // Starter area prefab
-    [SerializeField] private int roomTilesAcross = 15;   // must be odd
-    [SerializeField] private int minExitDistance = 120; // minimum walk from start to farthest tile
-    [SerializeField] private int maxAttempts = 50;      // how many seeds to try before giving up
-
+    [SerializeField] private bool buildOnStart = false;
+    [SerializeField] private int minMonsterDistance = 30;
+    [SerializeField] private int minExitDistance = 120;
+    [SerializeField] private int maxAttempts = 50;
+    [SerializeField] private int hideoutCount = 4;
+    [SerializeField] private GameObject startRoomPrefab;
+    [SerializeField] private int roomTilesAcross = 15;
 
     public Vector3 PlayerSpawnWorld { get; private set; }
     public Vector3 MonsterSpawnWorld { get; private set; }
@@ -39,23 +41,22 @@ public class MazeBuilder : MonoBehaviour
         int usedSeed = seed == 0 ? Random.Range(1, int.MaxValue) : seed;
         Vector2Int centerTile = new Vector2Int(2 * (cellsX / 2) + 1, 2 * (cellsY / 2) + 1);
 
-        // 1. Work out which tiles the start room owns and where its exits are
-        RoomLayout room = startRoomPrefab != null
+        RoomLayout startRoom = startRoomPrefab != null
             ? RoomLayout.FromPrefab(startRoomPrefab, centerTile, cellSize, roomTilesAcross)
             : RoomLayout.Square(centerTile, roomTilesAcross);
 
-        // 2. Generate the maze around the room
-        grid = GenerateWithMinPath(usedSeed, room, centerTile, out usedSeed);
+        var rooms = new List<RoomLayout> { startRoom };
 
+        grid = GenerateWithMinPath(usedSeed, rooms, centerTile, out usedSeed);
 
-        // 3. Pick spawns
         MazeSpawnPlan plan = MazeSpawns.Plan(grid, centerTile, usedSeed, minMonsterDistance);
         PlayerSpawnWorld = TileToWorld(plan.PlayerTile);
         MonsterSpawnWorld = TileToWorld(plan.MonsterTile);
 
-        // 4. Spawn geometry
         SpawnWalls();
-        SpawnRoom(centerTile);
+        SpawnFloor();
+        SpawnRoom(startRoom);
+        SpawnHideouts();
 
         if (bakeNavMesh)
             BakeNavMesh();
@@ -63,10 +64,31 @@ public class MazeBuilder : MonoBehaviour
         Debug.Log($"Maze built with seed {usedSeed}. Player {plan.PlayerTile}, monster {plan.MonsterTile}");
     }
 
+    private MazeGrid GenerateWithMinPath(int baseSeed, List<RoomLayout> rooms, Vector2Int centerTile, out int usedSeed)
+    {
+        MazeGrid result = null;
+        usedSeed = baseSeed;
+
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            usedSeed = baseSeed + attempt;
+            result = MazeGenerator.Generate(cellsX, cellsY, usedSeed, rooms, hideoutCount);
+
+            int[,] dist = MazeSpawns.DistancesFrom(result, centerTile);
+            int farthest = 0;
+            foreach (int d in dist)
+                farthest = Mathf.Max(farthest, d);
+
+           if (farthest >= minExitDistance && MazeGenerator.EntrancesHaveJunction(result, rooms, 6))
+                break;
+
+        }
+
+        return result;
+    }
+
     private void ClearOldMaze()
     {
-        // DestroyImmediate so old walls are gone before the NavMesh bake.
-        // Keep the floor OUTSIDE MazeRoot, or it will be deleted too.
         for (int i = mazeRoot.childCount - 1; i >= 0; i--)
             DestroyImmediate(mazeRoot.GetChild(i).gameObject);
     }
@@ -74,31 +96,60 @@ public class MazeBuilder : MonoBehaviour
     private void SpawnWalls()
     {
         for (int x = 0; x < grid.Width; x++)
-        {
             for (int y = 0; y < grid.Height; y++)
-            {
-                if (!grid.Walls[x, y])
-                    continue;
-
-                GameObject wall = Instantiate(wallPrefab, mazeRoot);
-                wall.transform.localPosition = TileToLocal(new Vector2Int(x, y)) + new Vector3(0f, wallHeight * 0.5f, 0f);
-                wall.transform.localScale = new Vector3(cellSize, wallHeight, cellSize);
-            }
-        }
+                if (grid.Walls[x, y])
+                    SpawnTile(wallPrefab, new Vector2Int(x, y), wallHeight, wallHeight * 0.5f);
     }
 
-    private void SpawnRoom(Vector2Int centerTile)
+    private void SpawnFloor()
+    {
+        if (floorTilePrefab == null)
+            return;
+
+        for (int x = 0; x < grid.Width; x++)
+            for (int y = 0; y < grid.Height; y++)
+                if (!grid.Walls[x, y] && !grid.Room[x, y])
+                    SpawnTile(floorTilePrefab, new Vector2Int(x, y), 0.1f, -0.05f);
+    }
+
+    private void SpawnHideouts()
+    {
+        if (hideoutPrefab == null)
+            return;
+
+        foreach (Vector2Int h in grid.Hideouts)
+            SpawnTile(hideoutPrefab, h, 0.1f, 0.05f);
+    }
+
+    private void SpawnRoom(RoomLayout room)
     {
         if (startRoomPrefab == null)
             return;
 
-        GameObject room = Instantiate(startRoomPrefab, mazeRoot);
-        room.transform.localPosition = TileToLocal(centerTile);
+        GameObject roomObject = Instantiate(startRoomPrefab, mazeRoot);
+        roomObject.transform.localPosition = TileToLocal(room.Center);
 
-        // Entrance markers are references only. Hide them so they don't block the openings.
-        foreach (Transform t in room.GetComponentsInChildren<Transform>(true))
-            if (t.name.StartsWith("Entrance"))
+        // Entrance markers are wall copies. Hide the ones chosen as openings, keep the rest as walls.
+        foreach (Transform t in roomObject.GetComponentsInChildren<Transform>(true))
+        {
+            if (!t.name.StartsWith("Entrance"))
+                continue;
+
+            Vector2Int tile = room.Center + new Vector2Int(
+                Mathf.RoundToInt(t.localPosition.x / cellSize),
+                Mathf.RoundToInt(t.localPosition.z / cellSize));
+
+            if (room.Chosen.Contains(tile))
                 t.gameObject.SetActive(false);
+        }
+    }
+
+    // Places one piece per tile. Scale and height are set per tile; the prefab should be a unit cube.
+    private void SpawnTile(GameObject prefab, Vector2Int tile, float height, float yOffset)
+    {
+        GameObject piece = Instantiate(prefab, mazeRoot);
+        piece.transform.localPosition = TileToLocal(tile) + new Vector3(0f, yOffset, 0f);
+        piece.transform.localScale = new Vector3(cellSize, height, cellSize);
     }
 
     private Vector3 TileToLocal(Vector2Int tile)
@@ -121,44 +172,11 @@ public class MazeBuilder : MonoBehaviour
         Bounds bounds = new Bounds(center, new Vector3(worldWidth, 10f, worldDepth));
 
         var sources = new List<NavMeshBuildSource>();
-        NavMeshBuilder.CollectSources(
-            bounds,
-            ~0,
-            NavMeshCollectGeometry.RenderMeshes,
-            0,
-            new List<NavMeshBuildMarkup>(),
-            sources);
+        NavMeshBuilder.CollectSources(bounds, ~0, NavMeshCollectGeometry.RenderMeshes, 0, new List<NavMeshBuildMarkup>(), sources);
 
         NavMeshData data = NavMeshBuilder.BuildNavMeshData(
-            NavMesh.GetSettingsByID(0),
-            sources,
-            bounds,
-            Vector3.zero,
-            Quaternion.identity);
+            NavMesh.GetSettingsByID(0), sources, bounds, Vector3.zero, Quaternion.identity);
 
         navInstance = NavMesh.AddNavMeshData(data);
     }
-        private MazeGrid GenerateWithMinPath(int baseSeed, RoomLayout room, Vector2Int centerTile, out int usedSeed)
-    {
-        MazeGrid result = null;
-        usedSeed = baseSeed;
-
-        for (int attempt = 0; attempt < maxAttempts; attempt++)
-        {
-            usedSeed = baseSeed + attempt;
-            result = MazeGenerator.Generate(cellsX, cellsY, usedSeed, room);
-
-            // Longest walk from the start room to any floor tile
-            int[,] dist = MazeSpawns.DistancesFrom(result, centerTile);
-            int farthest = 0;
-            foreach (int d in dist)
-                farthest = Mathf.Max(farthest, d);
-
-            if (farthest >= minExitDistance)
-                break;
-        }
-
-        return result;
-    }
-
 }

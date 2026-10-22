@@ -63,12 +63,7 @@ MonoBehaviour:
   m_Name: Sky and Fog Volume Profile
   m_EditorClassIdentifier: 
   components:
-  - {fileID: -7144266703663282270}
-  - {fileID: -8197026061481099889}
-  - {fileID: 4347110520325368845}
-  - {fileID: 7152964944390156513}
-  - {fileID: 2213052300588153066}
-  - {fileID: 1342143513881582669}
+  - {fileID: 7598520315819295575}
 --- !u!114 &1342143513881582669
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -366,3 +361,37 @@ MonoBehaviour:
   opacity:
     m_OverrideState: 1
     m_Value: 0.1
+--- !u!114 &7598520315819295575
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 558a8e2b6826cf840aae193990ba9f2e, type: 3}
+  m_Name: ShadowsMidtonesHighlights
+  m_EditorClassIdentifier: 
+  active: 0
+  shadows:
+    m_OverrideState: 0
+    m_Value: {x: 1, y: 1, z: 1, w: 0}
+  midtones:
+    m_OverrideState: 0
+    m_Value: {x: 1, y: 1, z: 1, w: 0}
+  highlights:
+    m_OverrideState: 0
+    m_Value: {x: 1, y: 1, z: 1, w: 0}
+  shadowsStart:
+    m_OverrideState: 0
+    m_Value: 0
+  shadowsEnd:
+    m_OverrideState: 0
+    m_Value: 0.3
+  highlightsStart:
+    m_OverrideState: 0
+    m_Value: 0.55
+  highlightsEnd:
+    m_OverrideState: 0
+    m_Value: 1

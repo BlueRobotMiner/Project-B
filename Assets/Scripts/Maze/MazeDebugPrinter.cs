@@ -1,5 +1,6 @@
 using System.Text;
 using UnityEngine;
+using System.Collections.Generic;
 
 public class MazeDebugPrinter : MonoBehaviour
 {
@@ -11,7 +12,7 @@ public class MazeDebugPrinter : MonoBehaviour
 
     private void Start()
     {
-        MazeGrid grid = MazeGenerator.Generate(cellsX, cellsY, seed, RoomLayout.Empty);
+        MazeGrid grid = MazeGenerator.Generate(cellsX, cellsY, seed, new List<RoomLayout>(), 0);
 
         Vector2Int playerTile = new Vector2Int(2 * (cellsX / 2) + 1, 2 * (cellsY / 2) + 1);
         MazeSpawnPlan plan = MazeSpawns.Plan(grid, playerTile, seed, minMonsterDistance);
