@@ -123,4 +123,5 @@ public class MazeBuilder : MonoBehaviour
 
         navInstance = NavMesh.AddNavMeshData(data);
     }
+
 }
