@@ -5,6 +5,7 @@ public class PlayerSpawner : MonoBehaviour
     [SerializeField] private MazeBuilder mazeBuilder;
     [SerializeField] private Transform player;      // the Player object
     [SerializeField] private Transform cameraPivot; // the Main Camera, for the wake-up look
+    [SerializeField] private WakeUpSequence wakeUp;
 
     private void Start()
     {
@@ -17,5 +18,6 @@ public class PlayerSpawner : MonoBehaviour
 
         // Face a random direction, so the start doesn't always look the same
         player.rotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+        StartCoroutine(wakeUp.Play());
     }
 }
