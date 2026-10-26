@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 410087040}
-  m_IndirectSpecularColor: {r: 0.003175133, g: 0.0065027885, b: 0.014528418, a: 1}
+  m_IndirectSpecularColor: {r: 0.0031937354, g: 0.006340966, b: 0.014489645, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -4370,11 +4370,9 @@ MonoBehaviour:
   eye: {fileID: 1629014406}
   range: 12
   coneHalfAngle: 45
-  stunSeconds: 4
+  retreatSeconds: 120
   rechargeSeconds: 8
   flashKey: 102
-  flashVisual: {fileID: 2007718166}
-  flashVisualTime: 0.15
   debugLogs: 1
 --- !u!114 &872656351
 MonoBehaviour:
@@ -4716,7 +4714,12 @@ MonoBehaviour:
   spawnName: PlayerSpawn
   spawnLift: 0.1
   monster: {fileID: 1571232385}
-  navSnapRadius: 3
+  preferredRoomNames:
+  - Safe area A
+  - Safe area B
+  - Safe area C
+  minWalkFromPlayer: 40
+  snapRadius: 4
 --- !u!4 &959672952
 Transform:
   m_ObjectHideFlags: 0
@@ -7955,6 +7958,7 @@ GameObject:
   - component: {fileID: 1507422473}
   - component: {fileID: 1507422472}
   - component: {fileID: 1507422471}
+  - component: {fileID: 1507422475}
   m_Layer: 5
   m_Name: Flash Canvas
   m_TagString: Untagged
@@ -8022,7 +8026,7 @@ Canvas:
   m_AdditionalShaderChannelsFlag: 0
   m_UpdateRectTransformForStandalone: 0
   m_SortingLayerID: 0
-  m_SortingOrder: 2
+  m_SortingOrder: 3
   m_TargetDisplay: 0
 --- !u!224 &1507422474
 RectTransform:
@@ -8045,6 +8049,21 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0, y: 0}
+--- !u!114 &1507422475
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1507422470}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: edcda79ecba6f734cb39d8ddaf749a14, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  image: {fileID: 2007718169}
+  fadeSeconds: 1.2
+  peakAlpha: 1
 --- !u!1 &1512027020
 GameObject:
   m_ObjectHideFlags: 0
@@ -8435,12 +8454,30 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e0f7af05d908af647a35d4c6fa218321, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  attackDistance: 1.5
-  turnSpeed: 6
-  animator: {fileID: 1571232384}
+  stalkSpeed: 1.2
   walkSpeed: 1.5
+  chaseSpeed: 3.8
+  huntSpeed: 2.4
   runSpeed: 3.5
+  stalkMoveMin: 2
+  stalkMoveMax: 15
+  stalkPauseMin: 3
+  stalkPauseMax: 7
+  sightRange: 25
+  sightAngle: 140
+  eyeHeight: 1.6
+  loseDistance: 40
+  loseSightSeconds: 6
+  huntSeconds: 60
+  searchRadius: 8
+  attackDistance: 1.5
   attackInterval: 1.5
+  turnSpeed: 6
+  retreatDistance: 40
+  stuckSeconds: 2
+  hitStunSeconds: 1.2
+  hitTurnSpeed: 10
+  animator: {fileID: 1571232384}
 --- !u!195 &1571232387
 NavMeshAgent:
   m_ObjectHideFlags: 0
@@ -8463,6 +8500,20 @@ NavMeshAgent:
   m_BaseOffset: 0
   m_WalkableMask: 4294967295
   m_ObstacleAvoidanceType: 4
+--- !u!136 &1571232388
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1571232383}
+  m_Material: {fileID: 0}
+  m_IsTrigger: 1
+  m_Enabled: 1
+  m_Radius: 0.5
+  m_Height: 1.8396591
+  m_Direction: 1
+  m_Center: {x: 0, y: 0.9525401, z: 0}
 --- !u!4 &1581419519 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 9065334652824403069, guid: da1203547328fdb41974e0b5334e799a,
@@ -9431,7 +9482,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &2007718167
 RectTransform:
   m_ObjectHideFlags: 0

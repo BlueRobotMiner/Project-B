@@ -9,6 +9,8 @@ using UnityEngine;
 public class SafeRoom : MonoBehaviour
 {
     private static readonly List<SafeRoom> all = new List<SafeRoom>();
+    public static IReadOnlyList<SafeRoom> All => all;
+
 
     [SerializeField] private Collider area;               // Covers the room (defaults to this object's collider)
     [SerializeField] private Transform starePoint;        // Where the monster waits outside the room

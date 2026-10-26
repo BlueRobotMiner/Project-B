@@ -1,25 +1,29 @@
+// PlayerSpawner
+// Builds the maze, places the player at PlayerSpawn, then places the monster just outside
+// one of the objective safe rooms (A, B, C), at that room's Stare Point, snapped onto the NavMesh.
+// Rooms too close to the player (by walking distance) are skipped.
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
-// PlayerSpawner
-// Builds the maze once, then places the player at the starter room's PlayerSpawn
-// and the monster at the MazeBuilder's monster spawn point (snapped onto the NavMesh).
 public class PlayerSpawner : MonoBehaviour
 {
     [SerializeField] private MazeBuilder mazeBuilder;
-    [SerializeField] private Transform player;          // the Player object
-    [SerializeField] private Transform cameraPivot;     // the Main Camera, for the wake-up look
+    [SerializeField] private Transform player;          // The Player object
+    [SerializeField] private Transform cameraPivot;     // The camera, for the wake-up look
     [SerializeField] private WakeUpSequence wakeUp;
-    [SerializeField] private string spawnName = "PlayerSpawn";   // Name of the spawn empty in the generated starter room
-    [SerializeField] private float spawnLift = 0.1f;             // Small lift so the player doesn't start inside the floor
+    [SerializeField] private string spawnName = "PlayerSpawn";
+    [SerializeField] private float spawnLift = 0.1f;
 
     [Header("Monster")]
-    [SerializeField] private Transform monster;                  // The monster object in the scene
-    [SerializeField] private float navSnapRadius = 3f;           // How far to search for the NavMesh near the spawn point
+    [SerializeField] private Transform monster;
+    [SerializeField] private string[] preferredRoomNames = { "Safe area A", "Safe area B", "Safe area C" };
+    [SerializeField] private float minWalkFromPlayer = 40f;  // Skip rooms closer than this (by walking distance)
+    [SerializeField] private float snapRadius = 4f;          // How far to search for the NavMesh near a Stare Point
 
     private void Start()
     {
-        // Build the maze first, so the starter room, PlayerSpawn, NavMesh, and monster spawn point all exist
+        // Build the maze first, so the rooms, NavMesh, and spawn points all exist
         mazeBuilder.Build();
 
         PlacePlayer();
@@ -39,11 +43,8 @@ public class PlayerSpawner : MonoBehaviour
 
         Transform spawn = spawnObject.transform;
 
-        // Put the player at the spawn point
         Vector3 pos = spawn.position;
         player.position = new Vector3(pos.x, pos.y + spawnLift, pos.z);
-
-        // Use only the spawn's Y rotation, so the player stays upright
         player.rotation = Quaternion.Euler(0f, spawn.eulerAngles.y, 0f);
     }
 
@@ -55,25 +56,103 @@ public class PlayerSpawner : MonoBehaviour
             return;
         }
 
-        // The point the maze builder picked, snapped onto the baked NavMesh
-        Vector3 target = mazeBuilder.MonsterSpawnWorld;
-        if (!NavMesh.SamplePosition(target, out NavMeshHit hit, navSnapRadius, NavMesh.AllAreas))
+        IReadOnlyList<SafeRoom> rooms = SafeRoom.All;
+        if (rooms.Count == 0)
         {
-            Debug.LogError("PlayerSpawner: the monster spawn point is not on the NavMesh", this);
+            Debug.LogError("PlayerSpawner: no safe rooms were found to spawn the monster near", this);
             return;
         }
-        
 
-        // Warping moves a NavMeshAgent safely onto the mesh; a plain move would leave it stranded
+        // Prefer the objective rooms (A, B, C). If none match, use any safe room.
+        List<SafeRoom> candidates = new List<SafeRoom>();
+        foreach (SafeRoom room in rooms)
+        {
+            if (IsPreferredRoom(room))
+                candidates.Add(room);
+        }
+        if (candidates.Count == 0)
+            candidates.AddRange(rooms);
+
+        Shuffle(candidates);   // A different room each run
+
+        Vector3 from = player.position;
+
+        // First pass: a room far enough away from the player
+        foreach (SafeRoom room in candidates)
+        {
+            if (TryPlaceNearRoom(room, from, minWalkFromPlayer)) return;
+        }
+
+        // Second pass: any reachable room, even if it's close
+        foreach (SafeRoom room in candidates)
+        {
+            if (TryPlaceNearRoom(room, from, 0f)) return;
+        }
+
+        Debug.LogError("PlayerSpawner: could not reach any safe room from the player's spawn", this);
+    }
+
+    private bool TryPlaceNearRoom(SafeRoom room, Vector3 from, float minWalk)
+    {
+        Vector3 stare = room.StarePoint != null ? room.StarePoint.position : room.transform.position;
+
+        if (!NavMesh.SamplePosition(stare, out NavMeshHit hit, snapRadius, NavMesh.AllAreas))
+            return false;
+
+        float walk = PathDistance(hit.position, from);
+        if (walk == float.MaxValue || walk < minWalk)
+            return false;
+
+        WarpMonster(hit.position);
+        Debug.Log($"PlayerSpawner: monster placed near '{room.gameObject.name}', {walk:F0} units of walking from the player");
+        return true;
+    }
+
+    private bool IsPreferredRoom(SafeRoom room)
+    {
+        foreach (string name in preferredRoomNames)
+        {
+            if (room.gameObject.name.StartsWith(name))
+                return true;
+        }
+        return false;
+    }
+
+    private void WarpMonster(Vector3 position)
+    {
         NavMeshAgent agent = monster.GetComponent<NavMeshAgent>();
         if (agent != null)
         {
             agent.enabled = false;   // Reset the agent so it's created on the new NavMesh
             agent.enabled = true;
-            agent.Warp(hit.position);
+            agent.Warp(position);
         }
-
         else
-            monster.position = hit.position;
+        {
+            monster.position = position;
+        }
+    }
+
+    // Walking distance along the NavMesh. Returns a huge number if there's no path.
+    private float PathDistance(Vector3 from, Vector3 to)
+    {
+        NavMeshPath path = new NavMeshPath();
+        if (!NavMesh.CalculatePath(from, to, NavMesh.AllAreas, path) || path.status != NavMeshPathStatus.PathComplete)
+            return float.MaxValue;
+
+        float total = 0f;
+        for (int i = 1; i < path.corners.Length; i++)
+            total += Vector3.Distance(path.corners[i - 1], path.corners[i]);
+
+        return total;
+    }
+
+    private static void Shuffle<T>(List<T> list)
+    {
+        for (int i = list.Count - 1; i > 0; i--)
+        {
+            int j = Random.Range(0, i + 1);
+            (list[i], list[j]) = (list[j], list[i]);
+        }
     }
 }
