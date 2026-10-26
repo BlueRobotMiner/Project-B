@@ -40,6 +40,8 @@ public class FirstPersonController : MonoBehaviour
     // The wake-up sequence can turn this off until the screen fades in
     public bool MovementEnabled { get; set; } = true;
     public float Stamina => stamina;
+    public float StaminaNormalized => maxStamina > 0f ? stamina / maxStamina : 0f;
+
 
     private void Awake()
     {
