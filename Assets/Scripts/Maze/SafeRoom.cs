@@ -2,15 +2,17 @@
 // Put on a room prefab. Give the room's root a Box Collider covering the room's floor
 // and walls (it doesn't have to block movement). While the player is inside with the
 // lights on, monsters wait at the Stare Point. If the player stays long enough, the
-// room's street lights turn off and the monster can come in.
+// room's street lights turn off, and the room opens up for the monster.
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
 public class SafeRoom : MonoBehaviour
 {
     private static readonly List<SafeRoom> all = new List<SafeRoom>();
-    public static IReadOnlyList<SafeRoom> All => all;
 
+    // Fired once when the lights go off. MazeBuilder uses this to open the room's NavMesh.
+    public static event Action<SafeRoom> LightsOff;
 
     [SerializeField] private Collider area;               // Covers the room (defaults to this object's collider)
     [SerializeField] private Transform starePoint;        // Where the monster waits outside the room
@@ -20,31 +22,32 @@ public class SafeRoom : MonoBehaviour
     private Transform player;
     private float timeInside;
 
+    public static IReadOnlyList<SafeRoom> All => all;
     public Transform StarePoint => starePoint;
     public bool LightsOn { get; private set; } = true;
 
-    void Awake()
+    private void Awake()
     {
         if (area == null) area = GetComponent<Collider>();
     }
 
-    void OnEnable()
+    private void OnEnable()
     {
         all.Add(this);
     }
 
-    void OnDisable()
+    private void OnDisable()
     {
         all.Remove(this);
     }
 
-    void Start()
+    private void Start()
     {
         FirstPersonController fpc = FindObjectOfType<FirstPersonController>();
         if (fpc != null) player = fpc.transform;
     }
 
-    void Update()
+    private void Update()
     {
         if (!LightsOn || player == null || area == null) return;
 
@@ -72,10 +75,13 @@ public class SafeRoom : MonoBehaviour
     public void TurnOffLights()
     {
         if (!LightsOn) return;
+
         LightsOn = false;
         foreach (Light light in streetLights)
         {
             if (light != null) light.enabled = false;
         }
+
+        LightsOff?.Invoke(this);
     }
 }

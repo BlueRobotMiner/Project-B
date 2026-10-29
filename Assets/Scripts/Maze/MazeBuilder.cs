@@ -20,15 +20,20 @@ public class MazeBuilder : MonoBehaviour
     [SerializeField] private int maxAttempts = 50;
     [SerializeField] private int hideoutCount = 4;
     [SerializeField] private GameObject startRoomPrefab;
-    [SerializeField] private int roomTilesAcross = 15;
+    [SerializeField] private int roomTilesAcross = 15;   // Start room only
+    [SerializeField] private float roomLift = 0.06f;     // Raises rooms just above the generated floor tiles
 
     [Header("Safe Rooms")]
+    [Tooltip("Must match the safe room prefab's size in tiles (its Box Collider size divided by Cell Size). Odd number.")]
+    [SerializeField] private int safeRoomTilesAcross = 11;
     [SerializeField] private GameObject[] requiredRoomPrefabs;   // A, B, C: each one is placed exactly once
     [SerializeField] private GameObject[] fillerRoomPrefabs;     // D, E: picked at random to fill the rest
     [SerializeField] private int safeRoomCount = 5;              // Total safe rooms (never fewer than the required ones)
     [SerializeField] private int roomMargin = 3;                 // Tiles kept clear between rooms
-    [SerializeField] private float roomLift = 0.06f;   // Raises rooms just above the generated floor tiles
 
+    [Header("NavMesh")]
+    [SerializeField] private float navAgentRadius = 0.4f;        // Match the monster's NavMeshAgent Radius
+    [SerializeField] private float navVoxelSize = 0.1f;          // Smaller = finer detail, so corners connect
 
     public Vector3 PlayerSpawnWorld { get; private set; }
     public Vector3 MonsterSpawnWorld { get; private set; }
@@ -41,6 +46,22 @@ public class MazeBuilder : MonoBehaviour
 
     private MazeGrid grid;
     private NavMeshDataInstance navInstance;
+    private readonly List<NavMeshDataInstance> roomNavInstances = new List<NavMeshDataInstance>();
+    private readonly Dictionary<SafeRoom, List<Vector2Int>> roomInteriors = new Dictionary<SafeRoom, List<Vector2Int>>();
+    private List<RoomLayout> bakedRooms = new List<RoomLayout>();   // Index 0 is the start room
+
+    // The top surface of the generated floor tiles is at height 0
+    private const float FloorTop = 0f;
+
+    private void OnEnable()
+    {
+        SafeRoom.LightsOff += OpenRoomNavMesh;
+    }
+
+    private void OnDisable()
+    {
+        SafeRoom.LightsOff -= OpenRoomNavMesh;
+    }
 
     private void Start()
     {
@@ -68,6 +89,7 @@ public class MazeBuilder : MonoBehaviour
             rooms.Add(plan.layout);
 
         grid = GenerateWithMinPath(usedSeed, rooms, centerTile, out usedSeed);
+        bakedRooms = rooms;
 
         MazeSpawnPlan spawnPlan = MazeSpawns.Plan(grid, centerTile, usedSeed, minMonsterDistance);
         PlayerSpawnWorld = TileToWorld(spawnPlan.PlayerTile);
@@ -109,7 +131,7 @@ public class MazeBuilder : MonoBehaviour
                 prefabs.Add(fillerRoomPrefabs[Random.Range(0, fillerRoomPrefabs.Length)]);
         }
 
-        int half = roomTilesAcross / 2 + roomMargin;
+        int half = safeRoomTilesAcross / 2 + roomMargin;
         var taken = new List<Vector2Int> { startRoom.Center };
 
         for (int i = 0; i < prefabs.Count; i++)
@@ -128,7 +150,7 @@ public class MazeBuilder : MonoBehaviour
             plans.Add(new SafeRoomPlan
             {
                 prefab = prefab,
-                layout = RoomLayout.FromPrefab(prefab, center.Value, cellSize, roomTilesAcross)
+                layout = RoomLayout.FromPrefab(prefab, center.Value, cellSize, safeRoomTilesAcross)
             });
         }
 
@@ -136,12 +158,17 @@ public class MazeBuilder : MonoBehaviour
     }
 
     // Finds a room center on an odd tile (like the start room) that fits and doesn't overlap.
+// Tries many spots and keeps the one farthest from the rooms already placed,
+// so the rooms spread across the maze instead of bunching together.
     private Vector2Int? FindFreeCenter(int half, List<Vector2Int> taken)
     {
         int width = 2 * cellsX + 1;
         int height = 2 * cellsY + 1;
 
-        for (int attempt = 0; attempt < 200; attempt++)
+        Vector2Int? best = null;
+        int bestScore = -1;
+
+        for (int attempt = 0; attempt < 300; attempt++)
         {
             Vector2Int c = new Vector2Int(2 * Random.Range(1, cellsX) + 1, 2 * Random.Range(1, cellsY) + 1);
 
@@ -149,6 +176,8 @@ public class MazeBuilder : MonoBehaviour
                 continue;
 
             bool overlaps = false;
+            int nearest = int.MaxValue;
+
             foreach (Vector2Int t in taken)
             {
                 if (Mathf.Abs(t.x - c.x) < 2 * half && Mathf.Abs(t.y - c.y) < 2 * half)
@@ -156,12 +185,22 @@ public class MazeBuilder : MonoBehaviour
                     overlaps = true;
                     break;
                 }
+
+                int dist = Mathf.Abs(t.x - c.x) + Mathf.Abs(t.y - c.y);
+                nearest = Mathf.Min(nearest, dist);
             }
 
-            if (!overlaps) return c;
+            if (overlaps) continue;
+
+            // Keep the spot that is farthest from its nearest neighbour
+            if (nearest > bestScore)
+            {
+                bestScore = nearest;
+                best = c;
+            }
         }
 
-        return null;
+        return best;
     }
 
     // ---- Generation ----
@@ -190,6 +229,11 @@ public class MazeBuilder : MonoBehaviour
 
     private void ClearOldMaze()
     {
+        foreach (NavMeshDataInstance instance in roomNavInstances)
+            instance.Remove();
+        roomNavInstances.Clear();
+        roomInteriors.Clear();
+
         for (int i = mazeRoot.childCount - 1; i >= 0; i--)
             DestroyImmediate(mazeRoot.GetChild(i).gameObject);
     }
@@ -202,19 +246,17 @@ public class MazeBuilder : MonoBehaviour
                     SpawnTile(wallPrefab, new Vector2Int(x, y), wallHeight, wallHeight * 0.5f);
     }
 
+    // Floor under every non-wall tile, including room tiles, so a room prefab can't leave a hole.
     private void SpawnFloor()
     {
         if (floorTilePrefab == null)
             return;
 
-        // Floor under everything that isn't a wall, including room tiles,
-        // so a room prefab with a smaller floor can't leave a hole
         for (int x = 0; x < grid.Width; x++)
             for (int y = 0; y < grid.Height; y++)
                 if (!grid.Walls[x, y])
                     SpawnTile(floorTilePrefab, new Vector2Int(x, y), 0.1f, -0.05f);
     }
-
 
     private void SpawnHideouts()
     {
@@ -225,16 +267,13 @@ public class MazeBuilder : MonoBehaviour
             SpawnTile(hideoutPrefab, h, 0.1f, 0.05f);
     }
 
-    // Spawns a room prefab at its tile and opens the entrances the generator chose.
-    // Spawns a room prefab at its tile and opens the entrances the generator chose.
+    // Spawns a room prefab at its tile, lifted slightly above the floor, and opens the chosen entrances.
     private GameObject SpawnRoom(RoomLayout room, GameObject prefab)
     {
         if (prefab == null)
             return null;
 
         GameObject roomObject = Instantiate(prefab, mazeRoot);
-
-        // Lift the room slightly so its floor sits above the generated floor tiles
         roomObject.transform.localPosition = TileToLocal(room.Center) + new Vector3(0f, roomLift, 0f);
 
         // Entrance markers are wall copies. Hide the ones chosen as openings, keep the rest as walls.
@@ -247,14 +286,15 @@ public class MazeBuilder : MonoBehaviour
                 Mathf.RoundToInt(t.localPosition.x / cellSize),
                 Mathf.RoundToInt(t.localPosition.z / cellSize));
 
-            if (room.Chosen.Contains(tile))
+            if (room.Chosen.Contains(room.Snap(tile)))
                 t.gameObject.SetActive(false);
         }
 
         return roomObject;
     }
 
-    // A safe room: spawn it and roll its decor. Objectives are already inside A, B, and C.
+    // A safe room: spawn it, roll its decor, and remember its inside tiles so its NavMesh
+    // can be added when its lights go off.
     private void SpawnSafeRoom(SafeRoomPlan plan)
     {
         GameObject roomObject = SpawnRoom(plan.layout, plan.prefab);
@@ -262,6 +302,10 @@ public class MazeBuilder : MonoBehaviour
 
         foreach (DecorGroup group in roomObject.GetComponentsInChildren<DecorGroup>(true))
             group.Roll();
+
+        SafeRoom room = roomObject.GetComponent<SafeRoom>();
+        if (room != null)
+            roomInteriors[room] = InteriorTiles(plan.layout);
     }
 
     // Places one piece per tile. Scale and height are set per tile; the prefab should be a unit cube.
@@ -282,21 +326,136 @@ public class MazeBuilder : MonoBehaviour
         return mazeRoot.position + TileToLocal(tile);
     }
 
+    // ---- NavMesh ----
+
+    // Build settings: finer voxels so corners connect, and a smaller radius to match the monster.
+    private NavMeshBuildSettings NavSettings()
+    {
+        NavMeshBuildSettings settings = NavMesh.GetSettingsByID(0);
+        settings.agentRadius = navAgentRadius;
+        settings.overrideVoxelSize = true;
+        settings.voxelSize = navVoxelSize;
+        settings.minRegionArea = 0.01f;   // Keep small corner pieces
+        return settings;
+    }
+
+    // The main NavMesh covers corridors, the start room, and the outside edge of each safe room
+    // (the openings). A safe room's inside is left out until its lights go off.
     private void BakeNavMesh()
     {
         navInstance.Remove();
 
+        var sources = new List<NavMeshBuildSource>();
+
+        for (int x = 0; x < grid.Width; x++)
+        {
+            for (int y = 0; y < grid.Height; y++)
+            {
+                Vector2Int tile = new Vector2Int(x, y);
+                if (IsWalkable(tile))
+                    sources.Add(TileSource(tile, FloorTop));
+            }
+        }
+
         float worldWidth = grid.Width * cellSize;
         float worldDepth = grid.Height * cellSize;
-        Vector3 center = mazeRoot.position + new Vector3(worldWidth * 0.5f, 0f, worldDepth * 0.5f);
-        Bounds bounds = new Bounds(center, new Vector3(worldWidth, 10f, worldDepth));
+        Vector3 boundsCenter = mazeRoot.position + new Vector3(worldWidth * 0.5f, 0f, worldDepth * 0.5f);
+        Bounds bounds = new Bounds(boundsCenter, new Vector3(worldWidth, 10f, worldDepth));
 
-        var sources = new List<NavMeshBuildSource>();
-        NavMeshBuilder.CollectSources(bounds, ~0, NavMeshCollectGeometry.RenderMeshes, 0, new List<NavMeshBuildMarkup>(), sources);
-
-        NavMeshData data = NavMeshBuilder.BuildNavMeshData(
-            NavMesh.GetSettingsByID(0), sources, bounds, Vector3.zero, Quaternion.identity);
+        NavMeshData data = NavMeshBuilder.BuildNavMeshData(NavSettings(), sources, bounds, Vector3.zero, Quaternion.identity);
 
         navInstance = NavMesh.AddNavMeshData(data);
+        Debug.Log($"MazeBuilder: NavMesh built from {sources.Count} walkable tiles");
+    }
+
+    // Called when a safe room's lights go off: add a NavMesh for just that room's inside,
+    // at the room's floor height, so the monster can walk in.
+    private void OpenRoomNavMesh(SafeRoom room)
+    {
+        if (!roomInteriors.TryGetValue(room, out List<Vector2Int> tiles))
+            return;
+
+        roomInteriors.Remove(room);   // Only open each room once
+
+        var sources = new List<NavMeshBuildSource>();
+        Vector2Int min = tiles.Count > 0 ? tiles[0] : Vector2Int.zero;
+        Vector2Int max = min;
+
+        foreach (Vector2Int tile in tiles)
+        {
+            min = Vector2Int.Min(min, tile);
+            max = Vector2Int.Max(max, tile);
+
+            if (!grid.Walls[tile.x, tile.y])
+                sources.Add(TileSource(tile, roomLift));
+        }
+
+        if (sources.Count == 0) return;
+
+        Vector3 a = TileToWorld(min);
+        Vector3 b = TileToWorld(max);
+        Vector3 mid = (a + b) * 0.5f;
+        Vector3 size = new Vector3(Mathf.Abs(b.x - a.x) + cellSize * 2f, 10f, Mathf.Abs(b.z - a.z) + cellSize * 2f);
+        Bounds bounds = new Bounds(mid, size);
+
+        NavMeshData data = NavMeshBuilder.BuildNavMeshData(NavSettings(), sources, bounds, Vector3.zero, Quaternion.identity);
+
+        roomNavInstances.Add(NavMesh.AddNavMeshData(data));
+        Debug.Log($"MazeBuilder: opened the NavMesh inside '{room.gameObject.name}' ({sources.Count} tiles)");
+    }
+
+    // A box whose top surface sits exactly at topY, so the NavMesh lies flat on the floor.
+    private NavMeshBuildSource TileSource(Vector2Int tile, float topY)
+    {
+        const float thickness = 0.2f;
+        Vector3 center = mazeRoot.position + TileToLocal(tile) + new Vector3(0f, topY - thickness * 0.5f, 0f);
+
+        return new NavMeshBuildSource
+        {
+            shape = NavMeshBuildSourceShape.Box,
+            size = new Vector3(cellSize, thickness, cellSize),
+            transform = Matrix4x4.TRS(center, Quaternion.identity, Vector3.one),
+            area = 0
+        };
+    }
+
+    // Tiles inside a room, not counting its outer wall ring.
+    private List<Vector2Int> InteriorTiles(RoomLayout room)
+    {
+        var tiles = new List<Vector2Int>();
+        int half = room.TilesAcross / 2;
+
+        for (int dx = -half + 1; dx < half; dx++)
+            for (int dy = -half + 1; dy < half; dy++)
+                tiles.Add(room.Center + new Vector2Int(dx, dy));
+
+        return tiles;
+    }
+
+    // Corridors and the start room are walkable. A safe room's inside is not (until its lights go off).
+    // On a safe room's outer edge, only the chosen openings are walkable, so the walls stay solid.
+    private bool IsWalkable(Vector2Int tile)
+    {
+        if (grid.Walls[tile.x, tile.y])
+            return false;
+
+        for (int i = 0; i < bakedRooms.Count; i++)
+        {
+            RoomLayout room = bakedRooms[i];
+            int half = room.TilesAcross / 2;
+            int dx = Mathf.Abs(tile.x - room.Center.x);
+            int dy = Mathf.Abs(tile.y - room.Center.y);
+
+            if (dx > half || dy > half)
+                continue;   // Not in this room
+
+            bool onEdge = dx == half || dy == half;
+            if (!onEdge)
+                return i == 0;   // Start room inside is walkable; safe room insides are not
+
+            return room.Chosen.Contains(tile);   // Outer edge: only the openings
+        }
+
+        return true;   // Corridor
     }
 }

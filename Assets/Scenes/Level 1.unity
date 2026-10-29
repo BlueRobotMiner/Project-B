@@ -4718,8 +4718,9 @@ MonoBehaviour:
   - Safe area A
   - Safe area B
   - Safe area C
-  minWalkFromPlayer: 40
-  snapRadius: 4
+  minWalkFromPlayer: 30
+  maxWalkFromPlayer: 80
+  snapRadius: 10
 --- !u!4 &959672952
 Transform:
   m_ObjectHideFlags: 0
@@ -5716,6 +5717,8 @@ MonoBehaviour:
   startRoomPrefab: {fileID: 7752413065879133828, guid: 239af1c12a7456440ba5706bf064ac2e,
     type: 3}
   roomTilesAcross: 15
+  roomLift: 0.06
+  safeRoomTilesAcross: 12
   requiredRoomPrefabs:
   - {fileID: 9068872063475462201, guid: 4f39299244b0c324e9437d9b0d650f9f, type: 3}
   - {fileID: 6003692665299809975, guid: c3bd4a1ff65a1a74fa7a754f59ac19a0, type: 3}
@@ -5724,9 +5727,10 @@ MonoBehaviour:
   fillerRoomPrefabs:
   - {fileID: 3993346828859572914, guid: 704ece03c3283c14bba899511ee73d9c, type: 3}
   - {fileID: 8158854600738694985, guid: 26ed4d7cf7b4ad840a470f7fd30e4fc5, type: 3}
-  safeRoomCount: 4
+  safeRoomCount: 6
   roomMargin: 1
-  roomLift: 0.06
+  navAgentRadius: 0.4
+  navVoxelSize: 0.1
 --- !u!4 &1050888434
 Transform:
   m_ObjectHideFlags: 0
@@ -8459,11 +8463,18 @@ MonoBehaviour:
   chaseSpeed: 3.8
   huntSpeed: 2.4
   runSpeed: 3.5
-  stalkMoveMin: 2
-  stalkMoveMax: 15
-  stalkPauseMin: 3
-  stalkPauseMax: 7
-  sightRange: 25
+  stareRange: 10
+  stareSeconds: 6
+  ambushChance: 0.4
+  watchRange: 30
+  watchAngle: 45
+  walkHearRange: 10
+  sprintHearRange: 25
+  walkSpeedThreshold: 1.5
+  sprintSpeedThreshold: 3.5
+  vanishDistance: 25
+  vanishSeconds: 15
+  sightRange: 40
   sightAngle: 140
   eyeHeight: 1.6
   loseDistance: 40
@@ -8475,9 +8486,13 @@ MonoBehaviour:
   turnSpeed: 6
   retreatDistance: 40
   stuckSeconds: 2
+  turnTimeout: 2
   hitStunSeconds: 1.2
   hitTurnSpeed: 10
   animator: {fileID: 1571232384}
+  maxFreezeSeconds: 4
+  freezeBreakDistance: 6
+  freezeLogInterval: 2
 --- !u!195 &1571232387
 NavMeshAgent:
   m_ObjectHideFlags: 0

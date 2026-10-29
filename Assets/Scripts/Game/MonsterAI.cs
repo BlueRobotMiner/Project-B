@@ -1,33 +1,49 @@
 // MonsterAI
-// Three moods:
-//   Stalk: creeps toward the player in short bursts, pausing to stand and watch.
-//   Chase: once it sees the player, it chases. It's a little slower than a player sprint,
-//          so the player can outrun it, but it catches up when they walk or stop.
-//   Hunt:  goes to the last place it knew the player was, searches nearby, then goes back to Stalk.
-//          Hunting starts when the player gets too far away (by walking distance), or stays out of
-//          sight too long, and also right after a flash retreat ends (at the spot they were flashed).
-// A flash freezes it for a hit reaction, turns it away, and makes it run far away (by walking
-// distance). Safe rooms with the lights on make it wait at the Stare Point.
+// Moods:
+//   Stalk:  always creeps toward the player along the NavMesh. Freezes while the player looks at it.
+//   Stare:  close enough to watch from around a corner. Stays frozen and faces the player.
+//           When the player looks away (or after a while), it either ambushes (chase) or vanishes.
+//   Vanish: runs to a spot out of the player's view, then goes back to stalking.
+//   Chase:  sprints at the player while it can. Slightly slower than a sprint, so it can be outrun.
+//   Hunt:   goes to the last known position (coordinates), searches around it, then back to Stalk.
+// Hearing: sprinting is heard from farther away than walking. Hearing starts a hunt at the sound.
+// Flash (retreat): freeze for the hit reaction, turn straight away from the player, run away
+// (by walking distance), then hunt the spot where the player was flashed. Every phase has a
+// timeout, so it always moves on.
 using UnityEngine;
 using UnityEngine.AI;
 
 [RequireComponent(typeof(NavMeshAgent))]
 public class MonsterAI : MonoBehaviour
 {
-    private enum Mood { Stalk, Chase, Hunt }
+    private enum Mood { Stalk, Stare, Vanish, Chase, Hunt }
+    private enum RetreatPhase { Stunned, Turning, Running }
 
     [Header("Speeds (match the walk and run clips)")]
     [SerializeField] private float stalkSpeed = 1.2f;     // Slow creep while stalking
     [SerializeField] private float walkSpeed = 1.5f;      // Waiting at a safe room's Stare Point
     [SerializeField] private float chaseSpeed = 3.8f;     // Player sprints at 4.5, walks at 2.5
     [SerializeField] private float huntSpeed = 2.4f;      // Walking pace while searching
-    [SerializeField] private float runSpeed = 3.5f;       // Full run speed, used to scale the animation
+    [SerializeField] private float runSpeed = 3.5f;       // Vanishing, retreating, and animation scale
 
-    [Header("Stalking")]
-    [SerializeField] private float stalkMoveMin = 2f;
-    [SerializeField] private float stalkMoveMax = 4f;
-    [SerializeField] private float stalkPauseMin = 3f;
-    [SerializeField] private float stalkPauseMax = 7f;
+    [Header("Stare and ambush")]
+    [SerializeField] private float stareRange = 10f;      // Walking distance at which it stops and stares
+    [SerializeField] private float stareSeconds = 6f;     // How long it stares if the player never looks
+    [SerializeField] private float ambushChance = 0.4f;   // Chance it charges instead of vanishing
+
+    [Header("Watching (the player's view)")]
+    [SerializeField] private float watchRange = 30f;      // How far the player's view can freeze it
+    [SerializeField] private float watchAngle = 45f;      // Half-angle of the player's view
+
+    [Header("Hearing")]
+    [SerializeField] private float walkHearRange = 10f;   // Walking distance it hears walking
+    [SerializeField] private float sprintHearRange = 25f; // Walking distance it hears sprinting
+    [SerializeField] private float walkSpeedThreshold = 1.5f;
+    [SerializeField] private float sprintSpeedThreshold = 3.5f;
+
+    [Header("Vanish")]
+    [SerializeField] private float vanishDistance = 25f;  // Walking distance it runs to when vanishing
+    [SerializeField] private float vanishSeconds = 15f;   // Gives up on a vanish after this long
 
     [Header("Sight")]
     [SerializeField] private float sightRange = 25f;      // How far it can see
@@ -38,27 +54,35 @@ public class MonsterAI : MonoBehaviour
     [SerializeField] private float loseDistance = 40f;    // Walking distance at which it stops chasing
     [SerializeField] private float loseSightSeconds = 6f; // Seconds out of sight before it starts hunting
     [SerializeField] private float huntSeconds = 60f;     // How long it searches
-    [SerializeField] private float searchRadius = 8f;     // How far around the last known spot it searches
+    [SerializeField] private float searchRadius = 8f;     // How far around the last known position it searches
 
     [Header("Attack")]
     [SerializeField] private float attackDistance = 1.5f;
     [SerializeField] private float attackInterval = 1.5f;
     [SerializeField] private float turnSpeed = 6f;
 
-    [Header("Retreat")]
+    [Header("Retreat (flash)")]
     [SerializeField] private float retreatDistance = 30f; // Walking distance it runs when flashed
     [SerializeField] private float stuckSeconds = 2f;     // Seconds without moving before it picks a new spot
-
-    [Header("Hit reaction")]
-    [SerializeField] private float hitStunSeconds = 1.2f; // Frozen in place while gethit1 plays
-    [SerializeField] private float hitTurnSpeed = 10f;    // How fast it turns to face away from the player
+    [SerializeField] private float turnTimeout = 2f;      // Longest it will spend turning away before running
+    [SerializeField] private float hitStunSeconds = 1.2f; // Frozen while gethit1 plays. Set to the clip length.
+    [SerializeField] private float hitTurnSpeed = 240f;   // Degrees per second while turning away
 
     [Header("Animation")]
     [SerializeField] private Animator animator;           // Leave empty to find it on the model
+    [SerializeField] private float maxFreezeSeconds = 4f;   // Longest it stays frozen in one watch before creeping again
+    private float freezeTimer;
+    [SerializeField] private float freezeBreakDistance = 6f;   // If the player gets this close, it stops freezing and hunts them
+    [SerializeField] private float freezeLogInterval = 2f;     // Seconds between debug messages while it's frozen or staring
+    private float freezeLogTimer;
+
+
 
     private NavMeshAgent agent;
     private Transform player;
     private PlayerLife playerLife;
+    private CharacterController playerController;
+    private Camera viewCamera;
 
     private Mood mood = Mood.Stalk;
     private Vector3 lastSeen;
@@ -66,15 +90,17 @@ public class MonsterAI : MonoBehaviour
     private float huntTimer;
     private float searchPauseTimer;
     private float attackCooldown;
-    private float retreatTimer;
-    private float stunTimer;
-    private float stuckTimer;
-    private Vector3 pendingRetreat;
-    private bool hasPendingRetreat;
-    private float phaseTimer;
-    private bool pausing;
     private float pathCheckTimer;
     private float pathDistance = float.MaxValue;
+    private float stareTimer;
+    private bool wasWatched;
+    private float vanishTimer;
+
+    private float retreatTimer;
+    private RetreatPhase retreatPhase;
+    private float retreatPhaseTimer;
+    private float stuckTimer;
+    private Vector3 pendingRetreat;
 
     private void Awake()
     {
@@ -90,7 +116,12 @@ public class MonsterAI : MonoBehaviour
         {
             player = fpc.transform;
             playerLife = fpc.GetComponent<PlayerLife>();
+            playerController = fpc.GetComponent<CharacterController>();
         }
+
+        // The camera the player looks through. Falls back to the main camera.
+        viewCamera = player != null ? player.GetComponentInChildren<Camera>() : null;
+        if (viewCamera == null) viewCamera = Camera.main;
     }
 
     private void Update()
@@ -102,13 +133,13 @@ public class MonsterAI : MonoBehaviour
 
         attackCooldown -= Time.deltaTime;
 
-        // Walk and run animations: running only when it's actually moving fast on a chase or retreat
+        // Animation: running only while it's moving fast on a chase, a vanish, or a retreat
         bool moving = agent.velocity.sqrMagnitude > 0.05f;
-        bool running = moving && (mood == Mood.Chase || retreatTimer > 0f);
+        bool running = moving && (mood == Mood.Chase || mood == Mood.Vanish || retreatTimer > 0f);
         animator?.SetFloat("Speed", Mathf.Clamp01(agent.velocity.magnitude / runSpeed), 0.2f, Time.deltaTime);
         animator?.SetBool("Running", running);
 
-        // Hit reaction and running away after a flash
+        // Flash: freeze, turn away, run, then hunt the flash spot
         if (retreatTimer > 0f)
         {
             RunRetreat();
@@ -131,57 +162,219 @@ public class MonsterAI : MonoBehaviour
             return;
         }
 
-        // Seeing the player (and being close enough) starts a chase
+        bool watched = IsWatchedByPlayer();
         bool canSee = CanSeePlayer();
-        if (canSee)
+        if (Time.frameCount % 60 == 0)
+        {
+            Debug.Log($"Monster: mood={mood} watched={watched} stopped={agent.isStopped} hasPath={agent.hasPath} pathDist={pathDistance:F0} vel={agent.velocity.magnitude:F2}");
+        }
+
+        // Hearing: it turns toward any sound it can hear, even from behind
+        if (mood != Mood.Chase && mood != Mood.Vanish && HearsPlayer())
         {
             lastSeen = playerPos;
-            if (pathDistance <= loseDistance)
-                mood = Mood.Chase;
+            StartHunt();
         }
 
         switch (mood)
         {
+            case Mood.Stalk:
+                StalkMood(watched, playerPos);
+                break;
+            case Mood.Stare:
+                StareMood(watched, playerPos);
+                break;
+            case Mood.Vanish:
+                VanishMood();
+                break;
             case Mood.Chase:
                 ChaseMood(canSee, playerPos);
                 break;
             case Mood.Hunt:
-                HuntMood();
-                break;
-            default:
-                Stalk(playerPos);
+                if (canSee && !watched && pathDistance <= loseDistance)
+                {
+                    lastSeen = playerPos;
+                    mood = Mood.Chase;
+                    ChaseMood(true, playerPos);
+                }
+                else
+                {
+                    HuntMood();
+                }
                 break;
         }
     }
 
-    // ---- Stalk: creep toward the player, then stand still and watch, over and over ----
+    // ---- Stalk: always creeps toward the player. Freezes while they look at it. ----
 
-    private void Stalk(Vector3 playerPos)
+    private void StalkMood(bool watched, Vector3 playerPos)
     {
-        phaseTimer -= Time.deltaTime;
-        if (phaseTimer <= 0f)
+        // Player got close: stop freezing and hunt them right away
+        if (PlayerTooClose(playerPos))
         {
-            pausing = !pausing;
-            phaseTimer = pausing
-                ? Random.Range(stalkPauseMin, stalkPauseMax)
-                : Random.Range(stalkMoveMin, stalkMoveMax);
+            BreakFreeze(playerPos);
+            return;
         }
 
-        agent.speed = stalkSpeed;
-
-        if (pausing)
+        if (watched)
         {
-            agent.isStopped = true;
-            FaceTarget(playerPos);
+            freezeTimer += Time.deltaTime;
         }
         else
         {
+            freezeTimer = 0f;
+        }
+
+        // Frozen while watched, but only up to maxFreezeSeconds at a time
+        if (watched && freezeTimer < maxFreezeSeconds)
+        {
+            LogFreezeState("frozen", freezeTimer, maxFreezeSeconds, watched);
+            agent.isStopped = true;
+            FaceTarget(playerPos);
+            return;
+        }
+
+        // Close enough: stop around the corner and stare
+        if (pathDistance <= stareRange)
+        {
+            EnterStare();
+            return;
+        }
+
+        agent.speed = stalkSpeed;
+        agent.isStopped = false;
+        SetDestinationSafe(playerPos);
+    }
+
+    // ---- Stare: stand still, face the player, and wait for them to look away ----
+
+    private void EnterStare()
+    {
+        mood = Mood.Stare;
+        stareTimer = stareSeconds;
+        wasWatched = false;
+        agent.isStopped = true;
+        }
+        private bool PlayerTooClose(Vector3 playerPos)
+    {
+        return Vector3.Distance(transform.position, playerPos) <= freezeBreakDistance;
+    }
+
+    // Ends any freeze or stare and starts chasing the player immediately
+    private void BreakFreeze(Vector3 playerPos)
+    {
+        freezeTimer = 0f;
+        lastSeen = playerPos;
+        lostTimer = 0f;
+        mood = Mood.Chase;
+        agent.isStopped = false;
+        Debug.Log("Monster: the player is too close. Breaking the freeze and hunting.", this);
+    }
+
+    // Prints how long it has been frozen or staring, every freezeLogInterval seconds
+    private void LogFreezeState(string label, float timer, float limit, bool watched)
+    {
+        freezeLogTimer -= Time.deltaTime;
+        if (freezeLogTimer > 0f) return;
+
+        freezeLogTimer = freezeLogInterval;
+        Debug.Log($"Monster {label}: {timer:F1}s of {limit:F1}s (watched={watched})", this);
+    }
+
+
+        private void StareMood(bool watched, Vector3 playerPos)
+    {
+        // Player got close: stop staring and hunt them right away
+        if (PlayerTooClose(playerPos))
+        {
+            BreakFreeze(playerPos);
+            return;
+        }
+
+        agent.isStopped = true;
+        FaceTarget(playerPos);
+
+        if (watched)
+        {
+            wasWatched = true;   // Frozen while the player is looking
+            LogFreezeState("staring (watched)", stareTimer, stareSeconds, watched);
+            return;
+        }
+
+        stareTimer -= Time.deltaTime;
+        LogFreezeState("staring", stareTimer, stareSeconds, watched);
+
+        // The player looked away, or waited too long: ambush or vanish
+        if (wasWatched || stareTimer <= 0f)
+        {
+            if (Random.value < ambushChance)
+            {
+                lastSeen = playerPos;
+                mood = Mood.Chase;
+            }
+            else
+            {
+                StartVanish();
+            }
+        }
+}
+
+    // ---- Vanish: run to a spot out of the player's view, then go back to stalking ----
+
+    private void StartVanish()
+    {
+        mood = Mood.Vanish;
+        vanishTimer = vanishSeconds;
+        agent.speed = runSpeed;
+        agent.isStopped = false;
+
+        if (!SetDestinationSafe(FindVanishPoint()))
+            mood = Mood.Stalk;
+    }
+
+    private void VanishMood()
+    {
+        vanishTimer -= Time.deltaTime;
+
+        bool arrived = !agent.pathPending && agent.remainingDistance <= agent.stoppingDistance + 0.5f;
+        if (arrived || vanishTimer <= 0f)
+        {
+            mood = Mood.Stalk;
             agent.isStopped = false;
-            agent.SetDestination(playerPos);
         }
     }
 
-    // ---- Chase: follow the player while they're in sight, or to the last spot they were seen ----
+    // A walkable spot about vanishDistance away (by walking) that's out of the player's view.
+    private Vector3 FindVanishPoint()
+    {
+        Vector3 from = player != null ? player.position : transform.position;
+        Vector3 camPosition = viewCamera != null ? viewCamera.transform.position : from;
+        Vector3 camForward = viewCamera != null ? viewCamera.transform.forward : Vector3.forward;
+
+        for (int i = 0; i < 25; i++)
+        {
+            Vector2 circle = Random.insideUnitCircle.normalized;
+            float straight = vanishDistance * Random.Range(0.4f, 1.2f);
+            Vector3 candidate = from + new Vector3(circle.x, 0f, circle.y) * straight;
+
+            if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+                continue;
+
+            float walking = PathDistance(hit.position, from);
+            if (walking == float.MaxValue || walking < vanishDistance * 0.6f)
+                continue;
+
+            // Out of the player's view: outside their cone, or too far to be seen
+            Vector3 toSpot = hit.position + Vector3.up - camPosition;
+            bool inView = toSpot.magnitude <= watchRange && Vector3.Angle(camForward, toSpot) <= watchAngle + 20f;
+            if (!inView)
+                return hit.position;
+        }
+
+        return FindRetreatPoint();   // Fallback: any reachable spot far away
+    }
+
+    // ---- Chase: follow the player while they're in sight, or to the last known position ----
 
     private void ChaseMood(bool canSee, Vector3 playerPos)
     {
@@ -193,10 +386,9 @@ public class MonsterAI : MonoBehaviour
             return;
         }
 
-        pausing = false;
         agent.speed = chaseSpeed;
         agent.isStopped = false;
-        agent.SetDestination(canSee ? playerPos : lastSeen);
+        SetDestinationSafe(canSee ? playerPos : lastSeen);
 
         if (canSee && Vector3.Distance(transform.position, playerPos) <= attackDistance && attackCooldown <= 0f)
         {
@@ -206,7 +398,7 @@ public class MonsterAI : MonoBehaviour
         }
     }
 
-    // ---- Hunt: go to the last known spot, then search and lurk nearby ----
+    // ---- Hunt: go to the last known position, search the area, then go back to stalking ----
 
     private void StartHunt()
     {
@@ -215,7 +407,10 @@ public class MonsterAI : MonoBehaviour
         searchPauseTimer = 0f;
         agent.speed = huntSpeed;
         agent.isStopped = false;
-        agent.SetDestination(lastSeen);
+
+        // If the position can't be reached at all, give up hunting and stalk instead
+        if (!SetDestinationSafe(lastSeen))
+            mood = Mood.Stalk;
     }
 
     private void HuntMood()
@@ -229,7 +424,7 @@ public class MonsterAI : MonoBehaviour
 
         agent.speed = huntSpeed;
 
-        bool arrived = !agent.pathPending && agent.remainingDistance <= agent.stoppingDistance + 0.5f;
+        bool arrived = !agent.pathPending && agent.remainingDistance <= agent.stoppingDistance + 0.6f;
         if (!arrived)
         {
             agent.isStopped = false;
@@ -239,19 +434,23 @@ public class MonsterAI : MonoBehaviour
         // Arrived: stand still for a moment, then search a new spot near the last known position
         agent.isStopped = true;
         searchPauseTimer -= Time.deltaTime;
-        if (searchPauseTimer <= 0f)
+        if (searchPauseTimer > 0f) return;
+
+        searchPauseTimer = Random.Range(2f, 5f);
+        if (!SetDestinationSafe(RandomPointNear(lastSeen, searchRadius)))
         {
-            searchPauseTimer = Random.Range(stalkPauseMin, stalkPauseMax);
-            agent.isStopped = false;
-            agent.SetDestination(RandomPointNear(lastSeen, searchRadius));
+            mood = Mood.Stalk;   // Nowhere reachable to search, so go back to stalking
+            return;
         }
+
+        agent.isStopped = false;
     }
 
     // ---- Safe room ----
 
     private void WaitAtStarePoint(SafeRoom room, Vector3 playerPos)
     {
-        pausing = false;
+        mood = Mood.Stalk;
         agent.speed = walkSpeed;
         agent.isStopped = false;
         agent.SetDestination(room.StarePoint.position);
@@ -263,7 +462,22 @@ public class MonsterAI : MonoBehaviour
         }
     }
 
-    // ---- Flash: hit reaction, turn away, run away, then hunt the spot they were flashed at ----
+    // ---- Hearing ----
+
+    // Sprinting is heard from farther away than walking. Standing still is not heard.
+    private bool HearsPlayer()
+    {
+        if (playerController == null) return false;
+
+        float speed = playerController.velocity.magnitude;
+        float range = speed >= sprintSpeedThreshold ? sprintHearRange
+                    : speed >= walkSpeedThreshold ? walkHearRange
+                    : 0f;
+
+        return range > 0f && pathDistance <= range;
+    }
+
+    // ---- Flash (retreat) ----
 
     // Called by FlashDevice when the flash hits this monster.
     public void Retreat(float seconds)
@@ -272,11 +486,15 @@ public class MonsterAI : MonoBehaviour
 
         // The player's position at the moment of the flash is where the hunt will start
         lastSeen = player != null ? player.position : transform.position;
-
-        // Freeze for the hit reaction, then run to the chosen spot
-        stunTimer = hitStunSeconds;
         pendingRetreat = FindRetreatPoint();
-        hasPendingRetreat = true;
+
+        BeginStun();
+    }
+
+    private void BeginStun()
+    {
+        retreatPhase = RetreatPhase.Stunned;
+        retreatPhaseTimer = hitStunSeconds;
         stuckTimer = 0f;
 
         agent.isStopped = true;
@@ -286,53 +504,141 @@ public class MonsterAI : MonoBehaviour
     private void RunRetreat()
     {
         retreatTimer -= Time.deltaTime;
+        retreatPhaseTimer -= Time.deltaTime;
 
-        // Hit reaction: stay frozen and turn to face away from the player
-        if (stunTimer > 0f)
+        switch (retreatPhase)
         {
-            stunTimer -= Time.deltaTime;
-            agent.isStopped = true;
-            FaceAwayFromPlayer();
+            case RetreatPhase.Stunned:
+                // Frozen while the hit reaction plays
+                agent.isStopped = true;
+                if (retreatPhaseTimer <= 0f)
+                {
+                    retreatPhase = RetreatPhase.Turning;
+                    retreatPhaseTimer = turnTimeout;
+                }
+                break;
 
-            if (retreatTimer <= 0f) StartHunt();
-            return;
+            case RetreatPhase.Turning:
+                // Turn straight away from the player, then run (or run anyway if it takes too long)
+                agent.isStopped = true;
+                if (TurnAwayFromPlayer() || retreatPhaseTimer <= 0f)
+                    StartRunning();
+                break;
+
+            case RetreatPhase.Running:
+                UpdateRunning();
+                break;
         }
 
-        // The stun is over: start running to the retreat spot
-        if (hasPendingRetreat)
-        {
-            hasPendingRetreat = false;
-            agent.speed = chaseSpeed;
-            agent.isStopped = false;
-            agent.SetDestination(pendingRetreat);
-        }
+        // Retreat is over: go to the spot where the player was flashed, and search there
+        if (retreatTimer <= 0f)
+            StartHunt();
+    }
 
-        bool arrived = !agent.pathPending && agent.remainingDistance <= agent.stoppingDistance + 0.5f;
+    private void StartRunning()
+    {
+        retreatPhase = RetreatPhase.Running;
+        agent.speed = runSpeed;
+        agent.isStopped = false;
+        stuckTimer = 0f;
+        SetDestinationSafe(pendingRetreat);
+    }
+
+    private void UpdateRunning()
+    {
+        bool hasPath = agent.hasPath || agent.pathPending;
+        bool arrived = hasPath && !agent.pathPending && agent.remainingDistance <= agent.stoppingDistance + 0.5f;
 
         if (arrived)
         {
-            // Reached the spot: stay put for the rest of the retreat
+            // Reached the spot: stay put until the retreat ends
             agent.isStopped = true;
             stuckTimer = 0f;
+            return;
         }
-        else if (!agent.isStopped && !agent.pathPending && agent.velocity.sqrMagnitude < 0.02f)
+
+        // No path, or trying to move but not moving: pick a new spot away from the player
+        bool notMoving = !agent.isStopped && agent.velocity.sqrMagnitude < 0.02f;
+        if (!hasPath || notMoving)
         {
-            // Trying to run but not moving (stuck on a corner): pick a new spot
             stuckTimer += Time.deltaTime;
-            if (stuckTimer >= stuckSeconds)
+            if (!hasPath || stuckTimer >= stuckSeconds)
             {
                 stuckTimer = 0f;
-                agent.SetDestination(FindRetreatPoint());
+                pendingRetreat = FindRetreatPoint();
+                SetDestinationSafe(pendingRetreat);
             }
         }
         else
         {
             stuckTimer = 0f;
         }
+    }
 
-        // Retreat is over: go to the spot where the player was flashed, and search there
-        if (retreatTimer <= 0f)
-            StartHunt();
+    // Turns the monster to face directly away from the player. Returns true once it's facing away.
+    private bool TurnAwayFromPlayer()
+    {
+        if (player == null) return true;
+
+        Vector3 away = transform.position - player.position;
+        away.y = 0f;
+        if (away.sqrMagnitude < 0.001f) return true;
+
+        Quaternion goal = Quaternion.LookRotation(away);
+        transform.rotation = Quaternion.RotateTowards(transform.rotation, goal, hitTurnSpeed * Time.deltaTime);
+        return Quaternion.Angle(transform.rotation, goal) < 10f;
+    }
+
+    // A reachable spot about retreatDistance (by walking) from the player, in the direction away from them.
+    // Never returns the monster's own position unless there's no NavMesh at all.
+    private Vector3 FindRetreatPoint()
+    {
+        Vector3 from = player != null ? player.position : transform.position;
+
+        Vector3 away = transform.position - from;
+        away.y = 0f;
+        away = away.sqrMagnitude > 0.01f ? away.normalized : transform.forward;
+
+        Vector3 best = Vector3.zero;
+        bool found = false;
+        float bestGap = float.MaxValue;
+
+        for (int i = 0; i < 30; i++)
+        {
+            Vector2 circle = Random.insideUnitCircle.normalized;
+            float straight = retreatDistance * Random.Range(0.3f, 1.5f);
+            Vector3 candidate = transform.position + new Vector3(circle.x, 0f, circle.y) * straight;
+
+            // Only spots in the direction away from the player
+            Vector3 toCandidate = candidate - transform.position;
+            toCandidate.y = 0f;
+            if (toCandidate.sqrMagnitude < 0.01f || Vector3.Dot(away, toCandidate.normalized) < 0.2f)
+                continue;
+
+            if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+                continue;
+
+            float walking = PathDistance(hit.position, from);
+            if (walking == float.MaxValue || walking < retreatDistance * 0.6f)
+                continue;
+
+            float gap = Mathf.Abs(walking - retreatDistance);
+            if (gap < bestGap)
+            {
+                bestGap = gap;
+                best = hit.position;
+                found = true;
+            }
+        }
+
+        if (found) return best;
+
+        // Fallback: straight away from the player
+        Vector3 fallback = transform.position + away * retreatDistance;
+        if (NavMesh.SamplePosition(fallback, out NavMeshHit fallbackHit, 10f, NavMesh.AllAreas))
+            return fallbackHit.position;
+
+        return transform.position;
     }
 
     // Plays the gethit1 state directly, with the Hit trigger as a fallback.
@@ -351,82 +657,76 @@ public class MonsterAI : MonoBehaviour
         }
     }
 
-    // Turns the monster to face directly away from the player.
-    private void FaceAwayFromPlayer()
-    {
-        if (player == null) return;
+    // ---- Sight, watching, and helpers ----
 
-        Vector3 away = transform.position - player.position;
-        away.y = 0f;
-        if (away.sqrMagnitude < 0.001f) return;
-
-        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(away), hitTurnSpeed * Time.deltaTime);
-    }
-
-    // Finds a NavMesh spot whose walking distance from the player is about retreatDistance.
-    private Vector3 FindRetreatPoint()
-    {
-        Vector3 from = player != null ? player.position : transform.position;
-
-        Vector3 bestPoint = transform.position;
-        float bestGap = float.MaxValue;
-
-        for (int i = 0; i < 25; i++)
-        {
-            Vector2 circle = Random.insideUnitCircle.normalized;
-            float straight = retreatDistance * Random.Range(0.3f, 1.5f);
-            Vector3 candidate = from + new Vector3(circle.x, 0f, circle.y) * straight;
-
-            if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit, 6f, NavMesh.AllAreas))
-                continue;
-
-            float walking = PathDistance(hit.position, from);
-            if (walking == float.MaxValue || walking < retreatDistance * 0.9f)
-                continue;
-
-            float gap = Mathf.Abs(walking - retreatDistance);
-            if (gap < bestGap)
-            {
-                bestGap = gap;
-                bestPoint = hit.position;
-            }
-        }
-
-        return bestPoint;
-    }
-
-    // ---- Sight and helpers ----
-
-    // True when the player is inside the field of view and nothing solid is between them.
+    // True when the monster can see the player: inside its field of view, and nothing solid in between.
     private bool CanSeePlayer()
     {
         if (player == null) return false;
 
         Vector3 eye = transform.position + Vector3.up * eyeHeight;
-        Vector3 target = player.position + Vector3.up * 1f;
-        Vector3 toPlayer = target - eye;
+        Vector3 toPlayer = player.position + Vector3.up - eye;
         float distance = toPlayer.magnitude;
 
         if (distance > sightRange || distance < 0.01f) return false;
         if (Vector3.Angle(transform.forward, toPlayer) > sightAngle * 0.5f) return false;
 
-        RaycastHit[] hits = Physics.RaycastAll(eye, toPlayer / distance, distance, ~0, QueryTriggerInteraction.Ignore);
+        Transform hit = FirstSolidHit(eye, toPlayer / distance, distance, transform);
+        return hit != null && hit.IsChildOf(player);
+    }
+
+    // True when the player is looking at the monster: inside their view cone, and nothing solid in between.
+    private bool IsWatchedByPlayer()
+    {
+        if (viewCamera == null) return false;
+
+        Vector3 eye = viewCamera.transform.position;
+        Vector3 toMonster = transform.position + Vector3.up - eye;
+        float distance = toMonster.magnitude;
+
+        if (distance > watchRange || distance < 0.01f) return false;
+        if (Vector3.Angle(viewCamera.transform.forward, toMonster) > watchAngle) return false;
+
+        // The player's own body is ignored. If nothing else is in the way, the monster is visible.
+        Transform hit = FirstSolidHit(eye, toMonster / distance, distance, player);
+        return hit == null || hit.IsChildOf(transform);
+    }
+
+    // The first solid thing along a ray, ignoring the given transform. Null if nothing is hit.
+    private static Transform FirstSolidHit(Vector3 origin, Vector3 direction, float distance, Transform ignore)
+    {
+        RaycastHit[] hits = Physics.RaycastAll(origin, direction, distance, ~0, QueryTriggerInteraction.Ignore);
         System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
 
         foreach (RaycastHit hit in hits)
         {
-            if (hit.transform.IsChildOf(transform)) continue;   // The monster itself
-            return hit.transform.IsChildOf(player);             // The first thing hit must be the player
+            if (ignore != null && hit.transform.IsChildOf(ignore)) continue;
+            return hit.transform;
         }
 
-        return false;
+        return null;
+    }
+
+    // Snaps the target onto the NavMesh before setting it. Returns false if there's no NavMesh near it.
+    private bool SetDestinationSafe(Vector3 target)
+    {
+        if (!NavMesh.SamplePosition(target, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+            return false;
+
+        agent.SetDestination(hit.position);
+        return true;
     }
 
     private Vector3 RandomPointNear(Vector3 center, float radius)
     {
-        Vector2 offset = Random.insideUnitCircle * radius;
-        Vector3 candidate = center + new Vector3(offset.x, 0f, offset.y);
-        return NavMesh.SamplePosition(candidate, out NavMeshHit hit, 4f, NavMesh.AllAreas) ? hit.position : center;
+        for (int i = 0; i < 8; i++)
+        {
+            Vector2 offset = Random.insideUnitCircle * radius;
+            Vector3 candidate = center + new Vector3(offset.x, 0f, offset.y);
+            if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, 4f, NavMesh.AllAreas))
+                return hit.position;
+        }
+        return center;
     }
 
     // Walking distance along the NavMesh. Returns a huge number if there's no path.
