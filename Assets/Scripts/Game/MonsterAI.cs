@@ -75,6 +75,10 @@ public class MonsterAI : MonoBehaviour
     [SerializeField] private float freezeBreakDistance = 6f;   // If the player gets this close, it stops freezing and hunts them
     [SerializeField] private float freezeLogInterval = 2f;     // Seconds between debug messages while it's frozen or staring
     private float freezeLogTimer;
+    [SerializeField] private float retreatPassMargin = 3f;     // Routes passing this close to the player are rejected
+    [SerializeField] private float retreatReplanSeconds = 1.5f; // How often it re-plans while you're close
+    private float retreatReplanTimer;
+
 
 
 
@@ -486,7 +490,6 @@ public class MonsterAI : MonoBehaviour
 
         // The player's position at the moment of the flash is where the hunt will start
         lastSeen = player != null ? player.position : transform.position;
-        pendingRetreat = FindRetreatPoint();
 
         BeginStun();
     }
@@ -536,36 +539,54 @@ public class MonsterAI : MonoBehaviour
     }
 
     private void StartRunning()
-    {
-        retreatPhase = RetreatPhase.Running;
-        agent.speed = runSpeed;
-        agent.isStopped = false;
-        stuckTimer = 0f;
-        SetDestinationSafe(pendingRetreat);
-    }
+{
+    retreatPhase = RetreatPhase.Running;
+    agent.speed = runSpeed;
+    agent.isStopped = false;
+    stuckTimer = 0f;
+    retreatReplanTimer = retreatReplanSeconds;
+
+    // Choose the escape point now, using where the player is now
+    pendingRetreat = FindRetreatPoint();
+    SetDestinationSafe(pendingRetreat);
+}
 
     private void UpdateRunning()
     {
-        bool hasPath = agent.hasPath || agent.pathPending;
-        bool arrived = hasPath && !agent.pathPending && agent.remainingDistance <= agent.stoppingDistance + 0.5f;
+        retreatReplanTimer -= Time.deltaTime;
 
+        Vector3 from = player != null ? player.position : transform.position;
+        bool threatened = Vector3.Distance(transform.position, from) < retreatDistance * 0.6f;
+        bool hasPath = agent.hasPath || agent.pathPending;
+
+        // While the player is close, re-plan using their current position
+        if (retreatReplanTimer <= 0f && (threatened || !hasPath))
+        {
+            retreatReplanTimer = retreatReplanSeconds;
+            pendingRetreat = FindRetreatPoint();
+            agent.isStopped = false;
+            SetDestinationSafe(pendingRetreat);
+            return;
+        }
+
+        bool arrived = hasPath && !agent.pathPending && agent.remainingDistance <= agent.stoppingDistance + 0.5f;
         if (arrived)
         {
-            // Reached the spot: stay put until the retreat ends
             agent.isStopped = true;
             stuckTimer = 0f;
             return;
         }
 
-        // No path, or trying to move but not moving: pick a new spot away from the player
+        // Trying to move but not moving: pick a new spot
         bool notMoving = !agent.isStopped && agent.velocity.sqrMagnitude < 0.02f;
-        if (!hasPath || notMoving)
+        if (notMoving)
         {
             stuckTimer += Time.deltaTime;
-            if (!hasPath || stuckTimer >= stuckSeconds)
+            if (stuckTimer >= stuckSeconds)
             {
                 stuckTimer = 0f;
                 pendingRetreat = FindRetreatPoint();
+                agent.isStopped = false;
                 SetDestinationSafe(pendingRetreat);
             }
         }
@@ -591,41 +612,47 @@ public class MonsterAI : MonoBehaviour
 
     // A reachable spot about retreatDistance (by walking) from the player, in the direction away from them.
     // Never returns the monster's own position unless there's no NavMesh at all.
-    private Vector3 FindRetreatPoint()
+        private Vector3 FindRetreatPoint()
     {
-        Vector3 from = player != null ? player.position : transform.position;
+        Vector3 me = transform.position;
+        Vector3 from = player != null ? player.position : me;
 
-        Vector3 away = transform.position - from;
+        Vector3 away = me - from;
         away.y = 0f;
         away = away.sqrMagnitude > 0.01f ? away.normalized : transform.forward;
 
-        Vector3 best = Vector3.zero;
         bool found = false;
-        float bestGap = float.MaxValue;
+        Vector3 best = Vector3.zero;
+        float bestScore = float.MaxValue;
 
-        for (int i = 0; i < 30; i++)
+        for (int i = 0; i < 40; i++)
         {
             Vector2 circle = Random.insideUnitCircle.normalized;
-            float straight = retreatDistance * Random.Range(0.3f, 1.5f);
-            Vector3 candidate = transform.position + new Vector3(circle.x, 0f, circle.y) * straight;
+            Vector3 dir = new Vector3(circle.x, 0f, circle.y);
 
-            // Only spots in the direction away from the player
-            Vector3 toCandidate = candidate - transform.position;
-            toCandidate.y = 0f;
-            if (toCandidate.sqrMagnitude < 0.01f || Vector3.Dot(away, toCandidate.normalized) < 0.2f)
+            // Only spots on the monster's side of the player
+            if (Vector3.Dot(away, dir) < 0.3f) continue;
+
+            Vector3 candidate = from + dir * retreatDistance * Random.Range(0.8f, 1.3f);
+            if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit, 2f, NavMesh.AllAreas)) continue;
+
+            NavMeshPath monsterPath = new NavMeshPath();
+            if (!NavMesh.CalculatePath(me, hit.position, NavMesh.AllAreas, monsterPath)
+                || monsterPath.status != NavMeshPathStatus.PathComplete)
                 continue;
 
-            if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit, 6f, NavMesh.AllAreas))
-                continue;
+            // The monster must get there first
+            float playerWalk = PathDistance(from, hit.position);
+            float monsterWalk = PathLength(monsterPath);
+            if (playerWalk == float.MaxValue || monsterWalk >= playerWalk) continue;
 
-            float walking = PathDistance(hit.position, from);
-            if (walking == float.MaxValue || walking < retreatDistance * 0.6f)
-                continue;
+            // The monster's route must not pass close to the player
+            if (PathPassesNear(monsterPath, from, retreatPassMargin)) continue;
 
-            float gap = Mathf.Abs(walking - retreatDistance);
-            if (gap < bestGap)
+            float score = Mathf.Abs(playerWalk - retreatDistance);
+            if (score < bestScore)
             {
-                bestGap = gap;
+                bestScore = score;
                 best = hit.position;
                 found = true;
             }
@@ -634,13 +661,36 @@ public class MonsterAI : MonoBehaviour
         if (found) return best;
 
         // Fallback: straight away from the player
-        Vector3 fallback = transform.position + away * retreatDistance;
-        if (NavMesh.SamplePosition(fallback, out NavMeshHit fallbackHit, 10f, NavMesh.AllAreas))
+        Vector3 fallback = me + away * retreatDistance;
+        if (NavMesh.SamplePosition(fallback, out NavMeshHit fallbackHit, 4f, NavMesh.AllAreas))
             return fallbackHit.position;
 
-        return transform.position;
+        return me;
+    }
+    // Total length of a calculated path
+    private static float PathLength(NavMeshPath path)
+    {
+        float total = 0f;
+        for (int i = 1; i < path.corners.Length; i++)
+            total += Vector3.Distance(path.corners[i - 1], path.corners[i]);
+        return total;
     }
 
+    // True if any segment of the path comes within radius of the point
+    private static bool PathPassesNear(NavMeshPath path, Vector3 point, float radius)
+    {
+        for (int i = 1; i < path.corners.Length; i++)
+        {
+            Vector3 a = path.corners[i - 1];
+            Vector3 ab = path.corners[i] - a;
+            float lengthSq = ab.sqrMagnitude;
+            float t = lengthSq > 0.0001f ? Mathf.Clamp01(Vector3.Dot(point - a, ab) / lengthSq) : 0f;
+
+            if (Vector3.Distance(a + ab * t, point) < radius)
+                return true;
+        }
+        return false;
+    }
     // Plays the gethit1 state directly, with the Hit trigger as a fallback.
     private void PlayHitAnimation()
     {
@@ -710,12 +760,13 @@ public class MonsterAI : MonoBehaviour
     // Snaps the target onto the NavMesh before setting it. Returns false if there's no NavMesh near it.
     private bool SetDestinationSafe(Vector3 target)
     {
-        if (!NavMesh.SamplePosition(target, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+        if (!NavMesh.SamplePosition(target, out NavMeshHit hit, 2f, NavMesh.AllAreas))
             return false;
 
         agent.SetDestination(hit.position);
         return true;
     }
+
 
     private Vector3 RandomPointNear(Vector3 center, float radius)
     {

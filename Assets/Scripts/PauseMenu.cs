@@ -16,7 +16,7 @@ public class PauseMenu : MonoBehaviour
     public Button resumeButton;
     public Button endRunButton;
     public Button settingsButton;
-    public Button quitButton;
+    public Button mainmenuButton;
     public string menuSceneName = "MainMenu";
     public KeyCode pauseKey = KeyCode.Escape;
 
@@ -29,7 +29,7 @@ public class PauseMenu : MonoBehaviour
         if (resumeButton != null) resumeButton.onClick.AddListener(Resume);
         if (settingsButton != null) settingsButton.onClick.AddListener(() => OpenPanel(settingsPanel));
         if (endRunButton != null) endRunButton.onClick.AddListener(EndRun);
-        if (quitButton != null) quitButton.onClick.AddListener(Quit);
+        if (mainmenuButton != null) mainmenuButton.onClick.AddListener(MainMenu);
 
         // Start unpaused without touching the player, so the wake-up sequence isn't overridden.
         IsPaused = false;
@@ -88,14 +88,11 @@ public class PauseMenu : MonoBehaviour
         SceneManager.LoadScene(menuSceneName);
     }
 
-    void Quit()
+    void MainMenu()
     {
         SetPaused(false);
-#if UNITY_EDITOR
-        UnityEditor.EditorApplication.isPlaying = false;
-#else
-        Application.Quit();
-#endif
+        SetCursor(true);   // The main menu needs a visible cursor
+        SceneManager.LoadScene(menuSceneName);
     }
 
     void OnDestroy()

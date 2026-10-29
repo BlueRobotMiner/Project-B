@@ -41,6 +41,7 @@ public class FirstPersonController : MonoBehaviour
     public bool MovementEnabled { get; set; } = true;
     public float Stamina => stamina;
     public float StaminaNormalized => maxStamina > 0f ? stamina / maxStamina : 0f;
+    private float stepTimer;
 
 
     private void Awake()
@@ -111,6 +112,23 @@ public class FirstPersonController : MonoBehaviour
             stamina = Mathf.Max(0f, stamina - staminaDrain * Time.deltaTime);
         else
             stamina = Mathf.Min(maxStamina, stamina + staminaRegen * Time.deltaTime);
+        // Breathing: tell the audio manager when stamina is empty
+        AudioManager.Instance?.SetOutOfBreath(stamina <= 0f);
+
+        // Footsteps: play one on a timer while moving on the ground
+        if (moving && cc.isGrounded)
+        {
+            stepTimer -= Time.deltaTime;
+            if (stepTimer <= 0f)
+            {
+                AudioManager.Instance?.PlayFootstep();
+                stepTimer = sprinting ? 0.35f : 0.5f;
+            }
+        }
+        else
+        {
+            stepTimer = 0f;
+        }
 
         float speed = crouching ? crouchSpeed : (sprinting ? sprintSpeed : walkSpeed);
 
