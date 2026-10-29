@@ -133,8 +133,7 @@ public class PlayerInteractor : MonoBehaviour
             Inventory.Add(id);
             Debug.Log($"Added '{id}' to the inventory from '{item.name}'");
         }
-
-        DialogUI.Instance?.Show(item.Description);
+        DialogUI.Instance?.ShowItem(id, item.Description);
         Destroy(item.gameObject);   // Remove the floor copy
     }
 }

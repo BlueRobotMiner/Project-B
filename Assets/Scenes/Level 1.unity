@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 410087040}
-  m_IndirectSpecularColor: {r: 0.003175133, g: 0.0065027885, b: 0.014528418, a: 1}
+  m_IndirectSpecularColor: {r: 0.0031616627, g: 0.0064784074, b: 0.014494026, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -2331,7 +2331,7 @@ MonoBehaviour:
   m_ReferencePixelsPerUnit: 100
   m_ScaleFactor: 1
   m_ReferenceResolution: {x: 1920, y: 1080}
-  m_ScreenMatchMode: 0
+  m_ScreenMatchMode: 1
   m_MatchWidthOrHeight: 0
   m_PhysicalUnit: 3
   m_FallbackScreenDPI: 96
@@ -2833,7 +2833,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &605856776
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2843,8 +2843,8 @@ RectTransform:
   m_GameObject: {fileID: 605856775}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
+  m_LocalScale: {x: 2, y: 2, z: 2}
+  m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 695458548}
   m_Father: {fileID: 947246364}
@@ -2852,8 +2852,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0}
   m_AnchorMax: {x: 0.5, y: 0}
-  m_AnchoredPosition: {x: -2.149, y: 46.43457}
-  m_SizeDelta: {x: 260, y: 50}
+  m_AnchoredPosition: {x: 0, y: 184}
+  m_SizeDelta: {x: 450, y: 80}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &605856777
 MonoBehaviour:
@@ -3379,7 +3379,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 
+  m_text: test
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -3406,10 +3406,10 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 18
+  m_fontSize: 44.75
   m_fontSizeBase: 18
   m_fontWeight: 400
-  m_enableAutoSizing: 0
+  m_enableAutoSizing: 1
   m_fontSizeMin: 18
   m_fontSizeMax: 72
   m_fontStyle: 0
@@ -4326,8 +4326,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   cameraHolder: {fileID: 1629014406}
-  reach: 3.5
-  aimRadius: 1
+  reach: 2.5
+  aimRadius: 0.5
   interactMask:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -4370,11 +4370,9 @@ MonoBehaviour:
   eye: {fileID: 1629014406}
   range: 12
   coneHalfAngle: 45
-  stunSeconds: 4
+  retreatSeconds: 120
   rechargeSeconds: 8
   flashKey: 102
-  flashVisual: {fileID: 2007718166}
-  flashVisualTime: 0.15
   debugLogs: 1
 --- !u!114 &872656351
 MonoBehaviour:
@@ -4590,11 +4588,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0cd44c1031e13a943bb63640046fad76, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_UiScaleMode: 0
+  m_UiScaleMode: 1
   m_ReferencePixelsPerUnit: 100
   m_ScaleFactor: 1
-  m_ReferenceResolution: {x: 800, y: 600}
-  m_ScreenMatchMode: 0
+  m_ReferenceResolution: {x: 1920, y: 1080}
+  m_ScreenMatchMode: 1
   m_MatchWidthOrHeight: 0
   m_PhysicalUnit: 3
   m_FallbackScreenDPI: 96
@@ -4679,6 +4677,21 @@ MonoBehaviour:
   panel: {fileID: 605856775}
   text: {fileID: 695458549}
   showSeconds: 4
+  gapSeconds: 0.6
+  wakeDelay: 3
+  wakeLine: Where am I?
+  itemLines:
+  - itemId: Camera
+    text: Maybe I can use this to my advantage. Press F to flash.
+  - itemId: Flashlight
+    text: A flashlight. Press V to switch to UV light, and look closely at what it
+      reveals.
+  - itemId: Keys
+    text: A set of keys. Something in this place must be locked.
+  - itemId: Fuel
+    text: A gas tank. The helicopter needs fuel to fly.
+  - itemId: TailRotor
+    text: A tail rotor. Without it, the helicopter won't leave the ground.
 --- !u!1 &959672950
 GameObject:
   m_ObjectHideFlags: 0
@@ -4716,7 +4729,13 @@ MonoBehaviour:
   spawnName: PlayerSpawn
   spawnLift: 0.1
   monster: {fileID: 1571232385}
-  navSnapRadius: 3
+  preferredRoomNames:
+  - Safe area A
+  - Safe area B
+  - Safe area C
+  minWalkFromPlayer: 30
+  maxWalkFromPlayer: 80
+  snapRadius: 10
 --- !u!4 &959672952
 Transform:
   m_ObjectHideFlags: 0
@@ -5713,6 +5732,8 @@ MonoBehaviour:
   startRoomPrefab: {fileID: 7752413065879133828, guid: 239af1c12a7456440ba5706bf064ac2e,
     type: 3}
   roomTilesAcross: 15
+  roomLift: 0.06
+  safeRoomTilesAcross: 12
   requiredRoomPrefabs:
   - {fileID: 9068872063475462201, guid: 4f39299244b0c324e9437d9b0d650f9f, type: 3}
   - {fileID: 6003692665299809975, guid: c3bd4a1ff65a1a74fa7a754f59ac19a0, type: 3}
@@ -5721,9 +5742,10 @@ MonoBehaviour:
   fillerRoomPrefabs:
   - {fileID: 3993346828859572914, guid: 704ece03c3283c14bba899511ee73d9c, type: 3}
   - {fileID: 8158854600738694985, guid: 26ed4d7cf7b4ad840a470f7fd30e4fc5, type: 3}
-  safeRoomCount: 4
+  safeRoomCount: 6
   roomMargin: 1
-  roomLift: 0.06
+  navAgentRadius: 0.4
+  navVoxelSize: 0.1
 --- !u!4 &1050888434
 Transform:
   m_ObjectHideFlags: 0
@@ -5964,8 +5986,8 @@ RectTransform:
   m_GameObject: {fileID: 1085976007}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
+  m_LocalScale: {x: 2, y: 2, z: 2}
+  m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 1450278661}
   m_Father: {fileID: 947246364}
@@ -5973,7 +5995,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0}
   m_AnchorMax: {x: 0.5, y: 0}
-  m_AnchoredPosition: {x: -2.149, y: 46.43457}
+  m_AnchoredPosition: {x: 0, y: 80}
   m_SizeDelta: {x: 260, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1085976009
@@ -6084,7 +6106,7 @@ MonoBehaviour:
   m_ReferencePixelsPerUnit: 100
   m_ScaleFactor: 1
   m_ReferenceResolution: {x: 1920, y: 1080}
-  m_ScreenMatchMode: 0
+  m_ScreenMatchMode: 1
   m_MatchWidthOrHeight: 0
   m_PhysicalUnit: 3
   m_FallbackScreenDPI: 96
@@ -6780,7 +6802,7 @@ MonoBehaviour:
   resumeButton: {fileID: 1107293030}
   endRunButton: {fileID: 0}
   settingsButton: {fileID: 491539270}
-  quitButton: {fileID: 125711460}
+  mainmenuButton: {fileID: 125711460}
   menuSceneName: MainMenu
   pauseKey: 27
 --- !u!114 &1228003573
@@ -6816,7 +6838,7 @@ MonoBehaviour:
   m_ReferencePixelsPerUnit: 100
   m_ScaleFactor: 1
   m_ReferenceResolution: {x: 1920, y: 1080}
-  m_ScreenMatchMode: 0
+  m_ScreenMatchMode: 1
   m_MatchWidthOrHeight: 0
   m_PhysicalUnit: 3
   m_FallbackScreenDPI: 96
@@ -7117,8 +7139,8 @@ RectTransform:
   m_GameObject: {fileID: 1297897347}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
+  m_LocalScale: {x: 3, y: 3, z: 3}
+  m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 946146611}
   - {fileID: 1390618174}
@@ -7127,7 +7149,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -254, y: -181.55505}
+  m_AnchoredPosition: {x: -681, y: -497}
   m_SizeDelta: {x: 160, y: 11.8899}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1297897349
@@ -7955,6 +7977,7 @@ GameObject:
   - component: {fileID: 1507422473}
   - component: {fileID: 1507422472}
   - component: {fileID: 1507422471}
+  - component: {fileID: 1507422475}
   m_Layer: 5
   m_Name: Flash Canvas
   m_TagString: Untagged
@@ -7995,7 +8018,7 @@ MonoBehaviour:
   m_ReferencePixelsPerUnit: 100
   m_ScaleFactor: 1
   m_ReferenceResolution: {x: 1920, y: 1080}
-  m_ScreenMatchMode: 0
+  m_ScreenMatchMode: 1
   m_MatchWidthOrHeight: 0
   m_PhysicalUnit: 3
   m_FallbackScreenDPI: 96
@@ -8022,7 +8045,7 @@ Canvas:
   m_AdditionalShaderChannelsFlag: 0
   m_UpdateRectTransformForStandalone: 0
   m_SortingLayerID: 0
-  m_SortingOrder: 2
+  m_SortingOrder: 3
   m_TargetDisplay: 0
 --- !u!224 &1507422474
 RectTransform:
@@ -8045,6 +8068,21 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0, y: 0}
+--- !u!114 &1507422475
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1507422470}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: edcda79ecba6f734cb39d8ddaf749a14, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  image: {fileID: 2007718169}
+  fadeSeconds: 1.2
+  peakAlpha: 1
 --- !u!1 &1512027020
 GameObject:
   m_ObjectHideFlags: 0
@@ -8435,12 +8473,43 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e0f7af05d908af647a35d4c6fa218321, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  attackDistance: 1.5
-  turnSpeed: 6
-  animator: {fileID: 1571232384}
+  stalkSpeed: 1.2
   walkSpeed: 1.5
+  chaseSpeed: 3.8
+  huntSpeed: 2.4
   runSpeed: 3.5
+  stareRange: 10
+  stareSeconds: 6
+  ambushChance: 0.4
+  watchRange: 30
+  watchAngle: 45
+  walkHearRange: 10
+  sprintHearRange: 25
+  walkSpeedThreshold: 1.5
+  sprintSpeedThreshold: 3.5
+  vanishDistance: 25
+  vanishSeconds: 15
+  sightRange: 40
+  sightAngle: 140
+  eyeHeight: 1.6
+  loseDistance: 40
+  loseSightSeconds: 6
+  huntSeconds: 60
+  searchRadius: 8
+  attackDistance: 1.5
   attackInterval: 1.5
+  turnSpeed: 6
+  retreatDistance: 40
+  stuckSeconds: 2
+  turnTimeout: 2
+  hitStunSeconds: 1.2
+  hitTurnSpeed: 10
+  animator: {fileID: 1571232384}
+  maxFreezeSeconds: 4
+  freezeBreakDistance: 6
+  freezeLogInterval: 2
+  retreatPassMargin: 3
+  retreatReplanSeconds: 1.5
 --- !u!195 &1571232387
 NavMeshAgent:
   m_ObjectHideFlags: 0
@@ -8463,6 +8532,20 @@ NavMeshAgent:
   m_BaseOffset: 0
   m_WalkableMask: 4294967295
   m_ObstacleAvoidanceType: 4
+--- !u!136 &1571232388
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1571232383}
+  m_Material: {fileID: 0}
+  m_IsTrigger: 1
+  m_Enabled: 1
+  m_Radius: 0.5
+  m_Height: 1.8396591
+  m_Direction: 1
+  m_Center: {x: 0, y: 0.9525401, z: 0}
 --- !u!4 &1581419519 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 9065334652824403069, guid: da1203547328fdb41974e0b5334e799a,
@@ -9431,7 +9514,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &2007718167
 RectTransform:
   m_ObjectHideFlags: 0
@@ -9662,7 +9745,7 @@ MonoBehaviour:
   m_ReferencePixelsPerUnit: 100
   m_ScaleFactor: 1
   m_ReferenceResolution: {x: 1920, y: 1080}
-  m_ScreenMatchMode: 0
+  m_ScreenMatchMode: 1
   m_MatchWidthOrHeight: 0
   m_PhysicalUnit: 3
   m_FallbackScreenDPI: 96
@@ -9873,8 +9956,8 @@ RectTransform:
   m_GameObject: {fileID: 2126606764}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
+  m_LocalScale: {x: 3, y: 3, z: 3}
+  m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 1795177887}
   - {fileID: 919924000}
@@ -9883,7 +9966,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 334.87268, y: -147.6798}
+  m_AnchoredPosition: {x: 889, y: -374}
   m_SizeDelta: {x: 10.6547, y: 85.1642}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &2126606766

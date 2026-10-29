@@ -1334,6 +1334,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 684564523292846768, guid: b694b8ec5c41f6247843a2b67222fda6,
         type: 3}
+      propertyPath: itemId
+      value: Flashlight
+      objectReference: {fileID: 0}
+    - target: {fileID: 684564523292846768, guid: b694b8ec5c41f6247843a2b67222fda6,
+        type: 3}
       propertyPath: onInteract.m_PersistentCalls.m_Calls.Array.size
       value: 2
       objectReference: {fileID: 0}
@@ -7274,6 +7279,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   actionName: pick up
   itemId: 
+  canPickUp: 1
+  description: 
 --- !u!1001 &9186364221891114880
 PrefabInstance:
   m_ObjectHideFlags: 0

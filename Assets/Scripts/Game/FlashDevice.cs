@@ -1,30 +1,25 @@
 // FlashDevice
-// The digital camera flash. Needs the "Camera" item in the inventory.
-// Press F: the Flash visual shows briefly every time. When the charge is full,
-// monsters in front of the camera are stunned. The charge refills over rechargeSeconds.
-using System.Collections;
+// The digital camera flash. Needs the "Camera" item. Press F when the charge is full:
+// the screen flashes (ScreenFlash), and monsters in front of the camera retreat.
+// Debug Logs prints each step, so you can see where the flash stops.
+using System.Collections.Generic;
 using UnityEngine;
 
 public class FlashDevice : MonoBehaviour
 {
     [SerializeField] private Transform eye;                 // The camera (PlayerCamera). Leave empty to use the main camera.
-    [SerializeField] private float range = 12f;
-    [SerializeField] private float coneHalfAngle = 45f;
-    [SerializeField] private float stunSeconds = 4f;
-    [SerializeField] private float rechargeSeconds = 8f;
+    [SerializeField] private float range = 30f;
+    [SerializeField] private float coneHalfAngle = 50f;
+    [SerializeField] private float retreatSeconds = 120f;   // How long a flashed monster stays away
+    [SerializeField] private float rechargeSeconds = 8f;    // Time to refill one full charge
     [SerializeField] private KeyCode flashKey = KeyCode.F;
-
-    [Header("Feedback")]
-    [SerializeField] private GameObject flashVisual;        // Leave empty to auto-find the object named "Flash"
-    [SerializeField] private float flashVisualTime = 0.15f;
 
     [Header("Debug")]
     [SerializeField] private bool debugLogs = true;
 
     private float charge = 1f;   // 0 = empty, 1 = ready
-    private Coroutine visualRoutine;
 
-    public float Charge01 => charge;   // For a HUD slider later
+    public float Charge01 => charge;   // Read by the HUD slider
 
     private void Awake()
     {
@@ -33,11 +28,8 @@ public class FlashDevice : MonoBehaviour
         if (eye == null)
             eye = transform;
 
-        if (flashVisual == null)
-            flashVisual = FindFlashVisual();
-
-        if (flashVisual != null)
-            flashVisual.SetActive(false);
+        if (debugLogs)
+            Debug.Log($"FlashDevice: eye is '{eye.name}'");
     }
 
     private void Update()
@@ -48,62 +40,55 @@ public class FlashDevice : MonoBehaviour
             return;
 
         bool hasCamera = Inventory.Has("Camera");
+        bool ready = charge >= 1f;
 
         if (debugLogs)
-            Debug.Log($"Flash key pressed. Has camera: {hasCamera}, charge: {charge:F2}, visual: {(flashVisual != null ? flashVisual.name : "MISSING")}");
+            Debug.Log($"FlashDevice: F pressed. Has camera: {hasCamera}, charge: {charge:F2}, ready: {ready}");
 
-        if (!hasCamera)
+        if (!hasCamera || !ready)
             return;
 
-        ShowFlashVisual();
-
-        if (charge >= 1f)
-            Flash();
+        Flash();
     }
 
     private void Flash()
     {
         charge = 0f;
+
         AudioManager.Instance?.PlayFlash();
+        ScreenFlash.Instance?.Play();
+
+        if (debugLogs && ScreenFlash.Instance == null)
+            Debug.LogWarning("FlashDevice: no ScreenFlash in the scene, so there's no flash on screen");
+
+        // Each monster is flashed once, even if several of its colliders are in range
+        HashSet<MonsterAI> flashed = new HashSet<MonsterAI>();
 
         Collider[] hits = Physics.OverlapSphere(eye.position, range);
+        if (debugLogs)
+            Debug.Log($"FlashDevice: {hits.Length} colliders in range {range}");
+
         foreach (Collider hit in hits)
         {
             MonsterAI monster = hit.GetComponentInParent<MonsterAI>();
-            if (monster == null) continue;
+            if (monster == null || flashed.Contains(monster)) continue;
 
             Vector3 toMonster = monster.transform.position - eye.position;
-            if (Vector3.Angle(eye.forward, toMonster) <= coneHalfAngle)
-                monster.Stun(stunSeconds);
+            float angle = Vector3.Angle(eye.forward, toMonster);
+
+            if (debugLogs)
+                Debug.Log($"FlashDevice: found monster '{monster.name}', distance {toMonster.magnitude:F1}, angle {angle:F0}");
+
+            if (angle <= coneHalfAngle)
+            {
+                flashed.Add(monster);
+                monster.Retreat(retreatSeconds);
+                if (debugLogs)
+                    Debug.Log($"FlashDevice: retreat sent to '{monster.name}'");
+            }
         }
-    }
 
-    private void ShowFlashVisual()
-    {
-        if (flashVisual == null) return;
-
-        if (visualRoutine != null)
-            StopCoroutine(visualRoutine);
-
-        visualRoutine = StartCoroutine(FlashVisualRoutine());
-    }
-
-    private IEnumerator FlashVisualRoutine()
-    {
-        flashVisual.SetActive(true);
-        yield return new WaitForSeconds(flashVisualTime);
-        flashVisual.SetActive(false);
-        visualRoutine = null;
-    }
-
-    // Finds the "Flash" object in the scene, including inactive ones (for example under Flash Canvas)
-    private GameObject FindFlashVisual()
-    {
-        foreach (Transform t in Resources.FindObjectsOfTypeAll<Transform>())
-        {
-            if (t.name == "Flash" && t.gameObject.scene.IsValid())
-                return t.gameObject;
-        }
-        return null;
+        if (debugLogs && flashed.Count == 0)
+            Debug.Log("FlashDevice: no monster was in the flash cone");
     }
 }
